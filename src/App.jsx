@@ -43,10 +43,10 @@ const CSS = `
 body{font-family:var(--body);font-weight:600;background:var(--bg) radial-gradient(#EFE3C0 1.5px,transparent 1.5px) 0 0/26px 26px;color:var(--ink)}
 button,input,select,textarea{font-family:inherit;font-weight:600}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--green);outline-offset:2px}
-.wrap{min-height:100vh}
+.wrap{min-height:100vh;overflow-x:clip}
 .hdr{background:#FBF6E9;position:sticky;top:0;z-index:100;border-bottom:3px solid var(--ink)}
 .hdr-in{max-width:1200px;margin:0 auto;display:flex;align-items:center;gap:16px;padding:0 28px;height:76px}
-.brand{display:flex;align-items:center;gap:10px;cursor:pointer;color:var(--green);font-family:var(--display);font-size:26px;font-weight:800;line-height:1}
+.brand{display:flex;align-items:center;min-width:0;gap:10px;cursor:pointer;color:var(--green);font-family:var(--display);font-size:26px;font-weight:800;line-height:1}
 .brand img{width:54px;height:54px;object-fit:contain;border-radius:16px;border:3px solid var(--ink);background:#fff}
 .brand small{display:block;font-family:var(--body);font-size:12px;font-weight:700;color:var(--muted);margin-top:3px}
 .search{flex:1;max-width:360px;margin:0 auto;background:#fff;border:3px solid var(--ink);border-radius:999px;padding:9px 18px;color:var(--ink);font-size:14px}
@@ -186,13 +186,55 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .emoji span{font-size:22px;text-align:center;padding:5px;border-radius:10px;cursor:pointer;border:2px solid transparent}
 .emoji span.on{background:#fff;border-color:var(--ink)}
 
+.burger{display:none;position:relative;z-index:300;background:#fff;border:3px solid var(--ink);box-shadow:2px 2px 0 var(--ink);width:44px;height:44px;border-radius:14px;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0}
+.dsearch,.only-m,.scrim{display:none}
+.admin-btn{opacity:.35}
+.item-info{flex:1;min-width:0}
+
 @media(max-width:900px){
 .dgrid{grid-template-columns:1fr}.hero h1{font-size:40px}
 .hero{min-height:0;align-items:flex-start;padding:36px 16px calc(56.25vw + 20px)}
 .hero-video{top:auto;bottom:0;left:0;right:auto;width:100%;height:auto;aspect-ratio:16/9;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 18%);mask-image:linear-gradient(to bottom,transparent,#000 18%)}
 .hero-text{max-width:100%}
-.perks-in,.foot-grid,.adm-stats{grid-template-columns:1fr 1fr}.search{display:none}.hdr-in{padding:0 14px}.sec{padding:40px 16px}.mgrid{grid-template-columns:1fr}.mgrid .full{grid-column:span 1}}
-@media(max-width:560px){.perks-in,.foot-grid{grid-template-columns:1fr}.nav-btn{padding:6px 8px}.brand small{display:none}}
+.perks-in,.foot-grid,.adm-stats{grid-template-columns:1fr 1fr}.mgrid{grid-template-columns:1fr}.mgrid .full{grid-column:span 1}
+.search{display:none}
+.hdr-in{height:68px;gap:10px;padding:0 14px}
+.brand{flex:1;font-size:22px}.brand img{width:44px;height:44px;border-radius:12px}
+.cart-btn{padding:8px 14px}
+.burger{display:block}
+.nav{position:fixed;top:0;right:0;bottom:0;width:min(82%,320px);margin:0;background:var(--bg);border-left:3px solid var(--ink);box-shadow:-6px 0 0 var(--ink);flex-direction:column;align-items:stretch;gap:8px;padding:84px 18px 24px;overflow-y:auto;transform:translateX(110%);visibility:hidden;transition:transform .25s ease,visibility .25s;z-index:200}
+.nav.open{transform:none;visibility:visible}
+.nav-btn{text-align:left;font-size:16px;padding:12px 16px;border-color:var(--ink);background:#fff}
+.nav-btn.on{background:var(--butter)}
+.dsearch{display:block;margin:0 0 6px}
+.only-m{display:inline}
+.admin-btn{opacity:1;margin-top:auto}
+.scrim.show{display:block;position:fixed;inset:0;background:rgba(74,46,26,.5);z-index:150}
+.sec{padding:40px 16px}}
+@media(max-width:560px){
+.perks-in,.foot-grid{grid-template-columns:1fr}.brand small{display:none}
+.brand{font-size:20px}.cart-btn{font-size:13px;padding:8px 12px}
+.hero h1{font-size:34px}.hero p{font-size:16px;margin-bottom:20px}
+.hero-btns .btn{flex:1;padding:11px 12px;font-size:14px;white-space:nowrap}
+.perk{padding:4px 6px}
+.sec{padding:32px 14px}.sec h2{font-size:28px}
+.tabs{flex-wrap:nowrap;overflow-x:auto;margin-inline:-14px;padding:2px 14px 8px}.tab{white-space:nowrap;flex-shrink:0}
+.grid{grid-template-columns:1fr 1fr;gap:12px}
+.card{border-radius:20px;box-shadow:3px 3px 0 var(--ink)}
+.card-img{height:128px;font-size:52px}
+.badge{font-size:10px;padding:3px 8px;top:8px;left:8px}.heart{width:30px;height:30px;font-size:13px;top:8px;right:8px}
+.card-body{padding:10px 12px 12px}.card-cat{font-size:11px}.card-name{font-size:15px}.rate{font-size:11px}
+.price-row{flex-wrap:wrap;gap:2px 6px;margin:6px 0 10px}.price{font-size:18px}.old{font-size:11px}.save{font-size:10px;padding:1px 6px}
+.add{font-size:13px;padding:7px}
+.cats{grid-template-columns:1fr 1fr;gap:12px}.cat{padding:16px 8px;border-radius:20px}.cat div:first-child{font-size:36px}.cat b{font-size:16px}
+.detail{padding:20px 16px}.dgrid{gap:22px}.dimg{height:250px;font-size:90px;box-shadow:5px 5px 0 var(--ink);border-radius:26px}.dname{font-size:28px}
+.cart{padding:24px 14px}.step{font-size:11px;padding:8px 2px}
+.item{flex-wrap:wrap;gap:10px;padding:12px}.item-info{flex:1 1 calc(100% - 80px)}.item .qty{margin-right:auto}
+.box{padding:16px}.rhead{padding:22px 14px}.rhead h2{font-size:26px}.rbody{padding:18px 14px}.oid{font-size:20px}
+.foot{padding:36px 16px 20px}
+.toast{left:14px;right:14px;bottom:14px;justify-content:center}
+.mbox{padding:20px}.emoji{grid-template-columns:repeat(6,1fr)}.login-card{padding:28px}
+.adm-h{height:auto;padding:10px 14px;flex-wrap:wrap;gap:8px}.adm-c{padding:20px 14px}.adm-c .row{flex-wrap:wrap}}
 `;
 
 const Img = ({ p }) => (p.imageData ? <img src={p.imageData} alt={p.name} /> : <span>{p.image}</span>);
@@ -388,9 +430,11 @@ export default function PawClub() {
   const [qty, setQty] = useState(1);
   const [form, setForm] = useState({ name: "", phone: "", address: "", city: "" });
   const [toast, setToast] = useState(null);
+  const [menu, setMenu] = useState(false); // mobile side menu
 
   useEffect(() => { try { localStorage.setItem("pc_products", JSON.stringify(products)); } catch {} }, [products]);
   useEffect(() => { try { localStorage.setItem("pc_orders", JSON.stringify(orders)); } catch {} }, [orders]);
+  useEffect(() => { document.body.style.overflow = menu ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menu]);
   useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
 
   const notify = (msg, color = "#2E8B57") => { setToast({ msg, color }); setTimeout(() => setToast(null), 2500); };
@@ -405,8 +449,8 @@ export default function PawClub() {
   const setQ = (id, q) => setCart((c) => (q < 1 ? c.filter((i) => i.id !== id) : c.map((i) => (i.id === id ? { ...i, qty: q } : i))));
   const toggle = (id) => setWish((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]));
   const view = (p) => { setSelected(p); setQty(1); };
-  const home = () => { setPage("home"); setSelected(null); setDone(null); };
-  const go = (p) => { setPage(p); setSelected(null); };
+  const home = () => { setPage("home"); setSelected(null); setDone(null); setMenu(false); };
+  const go = (p) => { setPage(p); setSelected(null); setMenu(false); };
 
   const place = () => {
     const method = PAYMENT_METHODS.find((m) => m.id === pm);
@@ -432,17 +476,22 @@ export default function PawClub() {
   return (
     <div className="wrap">
       {toast && <div className="toast"><i style={{ background: toast.color }} />{toast.msg}</div>}
-      <header className="hdr"><div className="hdr-in">
-        <div className="brand" onClick={home}><img src={logo} alt="Paw Club logo" /><div>Paw Club<small>Everything for happy cats</small></div></div>
-        <input className="search" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value) go("shop"); }} />
-        <nav className="nav">
-          <button className={`nav-btn ${page === "home" && !selected ? "on" : ""}`} onClick={home}>Home</button>
-          <button className={`nav-btn ${page === "shop" && !selected ? "on" : ""}`} onClick={() => go("shop")}>Shop</button>
-          <button className={`nav-btn ${page === "wish" ? "on" : ""}`} onClick={() => go("wish")}>Wishlist{wish.length ? ` (${wish.length})` : ""}</button>
+      <header className="hdr">
+        {menu && <div className="scrim show" onClick={() => setMenu(false)} />}
+        <div className="hdr-in">
+          <div className="brand" onClick={home}><img src={logo} alt="Paw Club logo" /><div>Paw Club<small>Everything for happy cats</small></div></div>
+          <input className="search" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value) go("shop"); }} />
+          <nav className={`nav ${menu ? "open" : ""}`}>
+            <input className="inp dsearch" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value) { setPage("shop"); setSelected(null); } }} />
+            <button className={`nav-btn ${page === "home" && !selected ? "on" : ""}`} onClick={home}>Home</button>
+            <button className={`nav-btn ${page === "shop" && !selected ? "on" : ""}`} onClick={() => go("shop")}>Shop</button>
+            <button className={`nav-btn ${page === "wish" ? "on" : ""}`} onClick={() => go("wish")}>Wishlist{wish.length ? ` (${wish.length})` : ""}</button>
+            <button className="nav-btn admin-btn" aria-label="Admin" onClick={() => { setMenu(false); setMode("login"); }}>🔧<span className="only-m"> Admin</span></button>
+          </nav>
           <button className="cart-btn" onClick={() => { setDone(null); go("cart"); }}>🛒 Cart{count ? ` (${count})` : ""}</button>
-          <button className="nav-btn" style={{ opacity: 0.35 }} aria-label="Admin" onClick={() => setMode("login")}>🔧</button>
-        </nav>
-      </div></header>
+          <button className="burger" aria-label={menu ? "Close menu" : "Open menu"} aria-expanded={menu} onClick={() => setMenu((m) => !m)}>{menu ? "✕" : "☰"}</button>
+        </div>
+      </header>
 
       {selected && (
         <div className="detail">
@@ -539,7 +588,7 @@ export default function PawClub() {
                 {cart.map((i) => (
                   <div key={i.id} className="item">
                     <div className="item-img"><Img p={i} /></div>
-                    <div style={{ flex: 1 }}><b>{i.name}</b><div style={{ color: "var(--green)", fontWeight: 700 }}>৳{i.price.toLocaleString()}</div></div>
+                    <div className="item-info"><b>{i.name}</b><div style={{ color: "var(--green)", fontWeight: 700 }}>৳{i.price.toLocaleString()}</div></div>
                     <div className="qty"><button onClick={() => setQ(i.id, i.qty - 1)}>−</button><span>{i.qty}</span><button onClick={() => setQ(i.id, i.qty + 1)}>+</button></div>
                     <b style={{ minWidth: 70, textAlign: "right" }}>৳{(i.price * i.qty).toLocaleString()}</b>
                     <button className="back" style={{ margin: 0 }} aria-label="Remove" onClick={() => setQ(i.id, 0)}>🗑</button>
