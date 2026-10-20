@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import logo from "./assets/logoo.png"; // replace this file when your new logo is ready
+import introVideo from "./assets/intro_video.mp4"; // hero intro video
 
 const ADMIN_PASSWORD = "pawclub2026"; // change this
 const DEFAULT_CATEGORIES = ["Food", "Toys", "Beds & Trees", "Litter", "Grooming", "Accessories"];
@@ -61,17 +62,13 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .btn.ghost{background:#fff}.btn.ghost:hover{background:var(--lav)}
 .btn.green{background:var(--green);color:#FFF6D8}.btn.block{width:100%}
 
-.hero{background:var(--lav) radial-gradient(#FFFDF5 2px,transparent 2px) 0 0/30px 30px;color:var(--ink);padding:64px 28px 84px;border-bottom:3px solid var(--ink);overflow:hidden}
-.hero-grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:center}
-.hero h1{font-family:var(--display);font-size:64px;line-height:1;font-weight:800;margin-bottom:18px;color:var(--green)}
+.hero{position:relative;min-height:560px;display:flex;align-items:center;padding:64px 28px;border-bottom:3px solid var(--ink);overflow:hidden;background:#F6EBD3;color:var(--ink)}
+.hero-video{position:absolute;top:0;right:0;width:70%;height:100%;object-fit:cover;pointer-events:none;-webkit-mask-image:linear-gradient(to right,transparent,#000 22%);mask-image:linear-gradient(to right,transparent,#000 22%)}
+.hero-grid{position:relative;z-index:1;max-width:1200px;width:100%;margin:0 auto}
+.hero-text{max-width:500px}
+.hero h1{font-family:var(--display);font-size:56px;line-height:1.05;font-weight:800;margin-bottom:18px;color:var(--green)}
 .hero p{color:var(--muted);font-size:18px;line-height:1.6;max-width:440px;margin-bottom:28px}
 .hero-btns{display:flex;gap:14px;flex-wrap:wrap}
-.hero-art{position:relative;height:380px;background:#F2C27A;border:3px solid var(--ink);box-shadow:10px 10px 0 var(--ink);border-radius:48% 52% 45% 55%/55% 45% 55% 45%;display:flex;align-items:center;justify-content:center;font-size:160px}
-.hero-art .cat{animation:float 3.5s ease-in-out infinite}
-@keyframes float{50%{transform:translateY(-12px) rotate(-3deg)}}
-.chip{position:absolute;background:#fff;color:var(--ink);padding:9px 16px;border:3px solid var(--ink);border-radius:999px;font-weight:700;font-size:14px;box-shadow:3px 3px 0 var(--ink)}
-.chip.a{top:26px;left:-18px;transform:rotate(-6deg);background:var(--butter)}.chip.b{bottom:70px;right:-14px;transform:rotate(5deg);background:var(--sky)}.chip.c{bottom:-12px;left:44px;transform:rotate(-3deg);background:var(--pink)}
-.paw{position:absolute;font-size:30px;opacity:.9}.paw.p1{top:-20px;right:60px;transform:rotate(20deg)}.paw.p2{top:150px;left:-34px;transform:rotate(-25deg)}
 .strip{background:var(--green);color:var(--butter);overflow:hidden;white-space:nowrap;border-bottom:3px solid var(--ink)}
 .strip-in{display:inline-block;padding:10px 0;font-family:var(--display);font-size:17px;animation:slide 28s linear infinite}
 .strip-in span{margin:0 22px}
@@ -190,7 +187,10 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .emoji span.on{background:#fff;border-color:var(--ink)}
 
 @media(max-width:900px){
-.hero-grid,.dgrid{grid-template-columns:1fr}.hero-art{height:280px;font-size:110px;max-width:340px;margin:10px auto 0}.hero h1{font-size:44px}
+.dgrid{grid-template-columns:1fr}.hero h1{font-size:40px}
+.hero{min-height:0;align-items:flex-start;padding:36px 16px calc(56.25vw + 20px)}
+.hero-video{top:auto;bottom:0;left:0;right:auto;width:100%;height:auto;aspect-ratio:16/9;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 18%);mask-image:linear-gradient(to bottom,transparent,#000 18%)}
+.hero-text{max-width:100%}
 .perks-in,.foot-grid,.adm-stats{grid-template-columns:1fr 1fr}.search{display:none}.hdr-in{padding:0 14px}.sec{padding:40px 16px}.mgrid{grid-template-columns:1fr}.mgrid .full{grid-column:span 1}}
 @media(max-width:560px){.perks-in,.foot-grid{grid-template-columns:1fr}.nav-btn{padding:6px 8px}.brand small{display:none}}
 `;
@@ -469,14 +469,14 @@ export default function PawClub() {
 
       {!selected && page === "home" && (
         <>
-          <section className="hero"><div className="hero-grid">
-            <div>
+          <section className="hero">
+            <video className="hero-video" src={introVideo} autoPlay loop muted playsInline preload="auto" aria-hidden="true" tabIndex={-1} disablePictureInPicture />
+            <div className="hero-grid"><div className="hero-text">
               <h1>Treats, toys and naps your cat will approve of 🐾</h1>
               <p>Food, play, beds and grooming picked by cat people. Delivered across Bangladesh.</p>
               <div className="hero-btns"><button className="btn" onClick={() => go("shop")}>Shop for your cat</button><button className="btn ghost" onClick={() => { setCategory("Toys"); go("shop"); }}>Browse toys</button></div>
-            </div>
-            <div className="hero-art"><span className="cat">🐱</span><span className="paw p1">🐾</span><span className="paw p2">🐾</span><span className="chip a">🐟 Fishy flavours</span><span className="chip b">🧶 New toys weekly</span><span className="chip c">🛏️ Nap-ready beds</span></div>
-          </div></section>
+            </div></div>
+          </section>
           <div className="strip"><div className="strip-in">{[0,1,2,3].map((k) => <span key={k}>🐾 Purr-fect picks 🐟 Treats 🧶 Toys 🛏️ Naps 💖 Cat approved</span>)}</div></div>
           <div className="perks"><div className="perks-in">
             {[["🚚", "Fast delivery", "Dhaka ৳80 · Outside ৳150"], ["✅", "Vet-approved picks", "Safe for everyday use"], ["💳", "Easy payment", "bKash, Nagad, COD"], ["💬", "Cat-parent support", "We reply within hours"]].map(([i, t, s]) => <div key={t} className="perk"><span>{i}</span><div>{t}<small>{s}</small></div></div>)}
