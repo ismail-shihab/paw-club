@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import logo from "./assets/logoo.png"; // replace this file when your new logo is ready
 import introVideo from "./assets/intro_video.mp4"; // hero intro video
 
@@ -339,7 +340,8 @@ function OrderModal({ order, onClose, onStatus }) {
 }
 
 function Admin({ products, setProducts, orders, setOrders, onLogout }) {
-  const [tab, setTab] = useState("products");
+  const nav = useNavigate();
+  const tab = useLocation().pathname.startsWith("/admin/orders") ? "orders" : "products";
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null);
   const [sel, setSel] = useState(null);
@@ -355,8 +357,8 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
       {sel && <OrderModal order={sel} onClose={() => setSel(null)} onStatus={status} />}
       <div className="adm-h">
         <div className="row"><b style={{ fontFamily: "var(--display)", fontSize: 18 }}>Paw Club admin</b>
-          <button className={`nav-btn ${tab === "products" ? "on" : ""}`} onClick={() => { setTab("products"); setQ(""); }}>Products</button>
-          <button className={`nav-btn ${tab === "orders" ? "on" : ""}`} onClick={() => { setTab("orders"); setQ(""); }}>Orders{pending > 0 && ` (${pending})`}</button>
+          <button className={`nav-btn ${tab === "products" ? "on" : ""}`} onClick={() => { nav("/admin/products"); setQ(""); }}>Products</button>
+          <button className={`nav-btn ${tab === "orders" ? "on" : ""}`} onClick={() => { nav("/admin/orders"); setQ(""); }}>Orders{pending > 0 && ` (${pending})`}</button>
         </div>
         <button className="nav-btn" onClick={onLogout}>Sign out</button>
       </div>
@@ -410,30 +412,90 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
   );
 }
 
-export default function PawClub() {
+const shopLink = (c) => (c && c !== "All" ? `/shop?category=${encodeURIComponent(c)}` : "/shop");
+
+function ProductPage({ products, wish, toggle, add }) {
+  const { id } = useParams();
+  const nav = useNavigate();
+  const [qty, setQty] = useState(1);
+  useEffect(() => setQty(1), [id]);
+  const selected = products.find((p) => String(p.id) === id);
+  if (!selected)
+    return <div className="sec"><div className="empty"><div>😿</div><b>Product not found</b>It may have been removed.<br /><button className="btn" onClick={() => nav("/shop")}>Browse products</button></div></div>;
+  return (
+    <div className="detail">
+      <button className="back" onClick={() => nav("/shop")}>← Back to products</button>
+      <div className="dgrid">
+        <div className="dimg"><Img p={selected} /></div>
+        <div>
+          <div className="card-cat">{selected.category}</div>
+          <h2 className="dname">{selected.name}</h2>
+          <div className="rate">{stars(selected.rating)}<span>{selected.rating} · {selected.reviews} reviews</span></div>
+          <p className="ddesc">{selected.description}</p>
+          <div className="price-row" style={{ marginBottom: 22 }}>
+            <span className="price" style={{ fontSize: 34 }}>৳{selected.price.toLocaleString()}</span>
+            <span className="old">৳{selected.originalPrice.toLocaleString()}</span>
+            <span className="save">Save {Math.round((1 - selected.price / selected.originalPrice) * 100)}%</span>
+          </div>
+          <div className="row" style={{ marginBottom: 20 }}><b>Quantity</b><div className="qty"><button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button><span>{qty}</span><button onClick={() => setQty((q) => q + 1)}>+</button></div></div>
+          <div className="row"><button className="btn block" onClick={() => add(selected, qty)}>Add to cart</button><button className="btn ghost block" onClick={() => { add(selected, qty); nav("/cart"); }}>Buy now</button></div>
+          <button className="back" style={{ marginTop: 14, marginBottom: 0 }} onClick={() => toggle(selected.id)}>{wish.includes(selected.id) ? "❤️ Saved to wishlist" : "🤍 Add to wishlist"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrderPage({ orders }) {
+  const { orderId } = useParams();
+  const nav = useNavigate();
+  const done = orders.find((o) => o.orderId === orderId);
+  if (!done)
+    return <div className="cart"><div className="empty"><div>🧾</div><b>Order not found</b>We couldn't find that order on this device.<br /><button className="btn" onClick={() => nav("/")}>Go home</button></div></div>;
+  return (
+    <div className="cart">
+      <div className="receipt" style={{ padding: 0 }}>
+        <div className="rhead"><div className="ok">✓</div><h2>Order placed</h2><p style={{ color: "#E6EBD9" }}>Thank you for shopping with Paw Club</p></div>
+        <div className="rbody">
+          <div className="oid">{done.orderId}</div>
+          <div className="box"><h4>Delivering to</h4><div style={{ lineHeight: 1.8 }}><b>{done.customer.name}</b> · {done.customer.phone}<br />{done.customer.address}, {done.customer.city}</div></div>
+          <div className="box"><h4>Items</h4>
+            {done.items.map((i, k) => <div key={k} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+            <div className="srow"><span>Delivery</span><span>৳{done.delivery}</span></div>
+            <div className="stot"><span>Total</span><span style={{ color: "var(--green)" }}>৳{done.total.toLocaleString()}</span></div>
+          </div>
+          <div className="srow"><span>Payment</span><b>{done.payment.method}{done.payment.txId && ` · ${done.payment.txId}`}</b></div>
+          <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14, lineHeight: 1.7 }}>We will call <b>{done.customer.phone}</b> to confirm. Expected delivery: 2–4 business days.</p>
+        </div>
+        <button className="btn block" onClick={() => nav("/")}>Continue shopping</button>
+      </div>
+    </div>
+  );
+}
+
+function PawClubApp() {
   const load = (k, d) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : d; } catch { return d; } };
-  const [mode, setMode] = useState("shop");
+  const nav = useNavigate();
+  const { pathname } = useLocation();
+  const [sp] = useSearchParams();
+  const category = sp.get("category") || "All";
+  const [authed, setAuthed] = useState(false);
   const [pw, setPw] = useState("");
   const [pwErr, setPwErr] = useState(false);
   const [products, setProducts] = useState(() => load("pc_products", DEFAULT_PRODUCTS));
   const [orders, setOrders] = useState(() => load("pc_orders", []));
-  const [page, setPage] = useState("home");
   const [cart, setCart] = useState([]);
   const [wish, setWish] = useState([]);
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("All");
-  const [selected, setSelected] = useState(null);
-  const [step, setStep] = useState(1);
   const [pm, setPm] = useState("");
   const [txId, setTxId] = useState("");
-  const [done, setDone] = useState(null);
-  const [qty, setQty] = useState(1);
   const [form, setForm] = useState({ name: "", phone: "", address: "", city: "" });
   const [toast, setToast] = useState(null);
   const [menu, setMenu] = useState(false); // mobile side menu
 
   useEffect(() => { try { localStorage.setItem("pc_products", JSON.stringify(products)); } catch {} }, [products]);
   useEffect(() => { try { localStorage.setItem("pc_orders", JSON.stringify(orders)); } catch {} }, [orders]);
+  useEffect(() => { window.scrollTo(0, 0); setMenu(false); }, [pathname]);
   useEffect(() => { document.body.style.overflow = menu ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menu]);
   useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
 
@@ -448,30 +510,156 @@ export default function PawClub() {
   const add = (p, n = 1) => { setCart((c) => c.find((i) => i.id === p.id) ? c.map((i) => (i.id === p.id ? { ...i, qty: i.qty + n } : i)) : [...c, { ...p, qty: n }]); notify(`${p.name} added to cart`); };
   const setQ = (id, q) => setCart((c) => (q < 1 ? c.filter((i) => i.id !== id) : c.map((i) => (i.id === id ? { ...i, qty: q } : i))));
   const toggle = (id) => setWish((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]));
-  const view = (p) => { setSelected(p); setQty(1); };
-  const home = () => { setPage("home"); setSelected(null); setDone(null); setMenu(false); };
-  const go = (p) => { setPage(p); setSelected(null); setMenu(false); };
+  const go = (path) => { nav(path); setMenu(false); };
+  const view = (p) => nav(`/product/${p.id}`);
 
   const place = () => {
     const method = PAYMENT_METHODS.find((m) => m.id === pm);
     const o = { orderId: orderId(), items: cart.map(({ id, name, image, price, qty, category }) => ({ id, name, image, price, qty, category })), customer: { ...form }, payment: { method: method.name, txId }, subtotal, delivery, total, status: "Pending", placedAt: Date.now() };
-    setOrders((prev) => [...prev, o]); setDone(o); setCart([]); setStep(1); setPm(""); setTxId("");
+    setOrders((prev) => [...prev, o]); setCart([]); setPm(""); setTxId("");
+    nav(`/order/${o.orderId}`, { replace: true });
   };
 
-  if (mode === "login")
-    return (
-      <div className="login"><div className="login-card">
-        <div style={{ fontSize: 40 }}>🐾</div><h2>Admin sign in</h2>
-        {pwErr && <p style={{ color: "#C0392B", marginBottom: 10 }}>Wrong password. Try again.</p>}
-        <input className="inp" type="password" placeholder="Password" value={pw} autoFocus onChange={(e) => setPw(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (pw === ADMIN_PASSWORD ? (setMode("admin"), setPw(""), setPwErr(false)) : (setPwErr(true), setPw("")))} />
-        <button className="btn block" onClick={() => (pw === ADMIN_PASSWORD ? (setMode("admin"), setPw(""), setPwErr(false)) : (setPwErr(true), setPw("")))}>Sign in</button>
-        <button className="nav-btn" style={{ marginTop: 10 }} onClick={() => setMode("shop")}>Back to shop</button>
-      </div></div>
-    );
-  if (mode === "admin") return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} onLogout={() => setMode("shop")} />;
+  const tryLogin = () => { if (pw === ADMIN_PASSWORD) { setAuthed(true); setPw(""); setPwErr(false); } else { setPwErr(true); setPw(""); } };
+
+  // ---------- Admin pages: /admin, /admin/products, /admin/orders ----------
+  if (pathname.startsWith("/admin")) {
+    if (!authed)
+      return (
+        <div className="login"><div className="login-card">
+          <div style={{ fontSize: 40 }}>🐾</div><h2>Admin sign in</h2>
+          {pwErr && <p style={{ color: "#C0392B", marginBottom: 10 }}>Wrong password. Try again.</p>}
+          <input className="inp" type="password" placeholder="Password" value={pw} autoFocus onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
+          <button className="btn block" onClick={tryLogin}>Sign in</button>
+          <button className="nav-btn" style={{ marginTop: 10 }} onClick={() => nav("/")}>Back to shop</button>
+        </div></div>
+      );
+    if (pathname.replace(/\/+$/, "") === "/admin") return <Navigate to="/admin/products" replace />;
+    return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} onLogout={() => { setAuthed(false); nav("/"); }} />;
+  }
 
   const grid = (list) => <div className="grid">{list.map((p) => <Card key={p.id} p={p} onView={() => view(p)} onAdd={() => add(p)} wish={wish} toggle={toggle} />)}</div>;
+
+  // ---------- Home: / ----------
+  const homeEl = (
+    <>
+      <section className="hero">
+        <video className="hero-video" src={introVideo} autoPlay loop muted playsInline preload="auto" aria-hidden="true" tabIndex={-1} disablePictureInPicture />
+        <div className="hero-grid"><div className="hero-text">
+          <h1>Treats, toys and naps your cat will approve of 🐾</h1>
+          <p>Food, play, beds and grooming picked by cat people. Delivered across Bangladesh.</p>
+          <div className="hero-btns"><button className="btn" onClick={() => go("/shop")}>Shop for your cat</button><button className="btn ghost" onClick={() => go(shopLink("Toys"))}>Browse toys</button></div>
+        </div></div>
+      </section>
+      <div className="strip"><div className="strip-in">{[0,1,2,3].map((k) => <span key={k}>🐾 Purr-fect picks 🐟 Treats 🧶 Toys 🛏️ Naps 💖 Cat approved</span>)}</div></div>
+      <div className="perks"><div className="perks-in">
+        {[["🚚", "Fast delivery", "Dhaka ৳80 · Outside ৳150"], ["✅", "Vet-approved picks", "Safe for everyday use"], ["💳", "Easy payment", "bKash, Nagad, COD"], ["💬", "Cat-parent support", "We reply within hours"]].map(([i, t, s]) => <div key={t} className="perk"><span>{i}</span><div>{t}<small>{s}</small></div></div>)}
+      </div></div>
+      <div className="sec">
+        <h2>Cat favourites 💖</h2><p className="sub">What other cat parents keep re-ordering</p>
+        {grid(products.filter((p) => p.badge).slice(0, 8))}
+        <div style={{ textAlign: "center", marginTop: 32 }}><button className="btn" onClick={() => go("/shop")}>See all products</button></div>
+      </div>
+      <div className="band"><div className="sec">
+        <h2>Shop by category 🐾</h2><p className="sub">Jump straight to what your cat needs</p>
+        <div className="cats">{cats.map((c) => <div key={c} className="cat" onClick={() => go(shopLink(c))}><div>{catIcons[c] || "🐾"}</div><b>{c}</b><small>{products.filter((p) => p.category === c).length} products</small></div>)}</div>
+      </div></div>
+    </>
+  );
+
+  // ---------- Shop: /shop and /shop?category=Toys ----------
+  const shopEl = (
+    <div className="sec">
+      <h2>All cat supplies</h2><p className="sub">{shown.length} products</p>
+      <input className="inp" style={{ maxWidth: 380 }} placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="tabs">{["All", ...cats].map((c) => <button key={c} className={`tab ${category === c ? "on" : ""}`} onClick={() => nav(shopLink(c))}>{c}</button>)}</div>
+      {grid(shown)}
+      {shown.length === 0 && <div className="empty"><div>😿</div><b>No products found</b>Try another search or category.<br /><button className="btn" onClick={() => { setSearch(""); nav("/shop"); }}>Clear filters</button></div>}
+    </div>
+  );
+
+  // ---------- Wishlist: /wishlist ----------
+  const wishEl = (
+    <div className="sec">
+      <h2>Wishlist</h2><p className="sub">Saved for later</p>
+      {wish.length === 0 ? <div className="empty"><div>🤍</div><b>Nothing saved yet</b>Tap the heart on any product to save it.<br /><button className="btn" onClick={() => go("/shop")}>Browse products</button></div> : grid(products.filter((p) => wish.includes(p.id)))}
+    </div>
+  );
+
+  // ---------- Checkout: /cart, /checkout/delivery, /checkout/payment, /checkout/review ----------
+  const step = { "/cart": 1, "/checkout/delivery": 2, "/checkout/payment": 3, "/checkout/review": 4 }[pathname.replace(/\/+$/, "")] || 1;
+  const formOk = form.name && form.phone && form.address && form.city;
+  const pmObj = PAYMENT_METHODS.find((m) => m.id === pm);
+  const payOk = pmObj && (!pmObj.needsTx || txId);
+  const checkoutEl =
+    cart.length === 0 ? (
+      <div className="cart"><div className="empty"><div>🛒</div><b>Your cart is empty</b>Add something your cat will love.<br /><button className="btn" onClick={() => go("/shop")}>Start shopping</button></div></div>
+    ) : step >= 3 && !formOk ? (
+      <Navigate to="/checkout/delivery" replace />
+    ) : step === 4 && !payOk ? (
+      <Navigate to="/checkout/payment" replace />
+    ) : (
+      <div className="cart">
+        <h2 style={{ fontFamily: "var(--display)", fontSize: 32, color: "var(--green)" }}>Checkout</h2>
+        <div className="steps">{["Cart", "Delivery", "Payment", "Confirm"].map((s, i) => <div key={s} className={`step ${step === i + 1 ? "on" : ""} ${step > i + 1 ? "done" : ""}`}>{step > i + 1 ? "✓ " : ""}{s}</div>)}</div>
+
+        {step === 1 && (<>
+          {cart.map((i) => (
+            <div key={i.id} className="item">
+              <div className="item-img"><Img p={i} /></div>
+              <div className="item-info"><b>{i.name}</b><div style={{ color: "var(--green)", fontWeight: 700 }}>৳{i.price.toLocaleString()}</div></div>
+              <div className="qty"><button onClick={() => setQ(i.id, i.qty - 1)}>−</button><span>{i.qty}</span><button onClick={() => setQ(i.id, i.qty + 1)}>+</button></div>
+              <b style={{ minWidth: 70, textAlign: "right" }}>৳{(i.price * i.qty).toLocaleString()}</b>
+              <button className="back" style={{ margin: 0 }} aria-label="Remove" onClick={() => setQ(i.id, 0)}>🗑</button>
+            </div>
+          ))}
+          <div className="box"><div className="srow"><span>Delivery</span><span>Calculated next step</span></div><div className="stot"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div>
+            <button className="btn block" style={{ marginTop: 16 }} onClick={() => nav("/checkout/delivery")}>Continue to delivery</button></div>
+        </>)}
+
+        {step === 2 && (<>
+          {[["name", "Full name", ""], ["phone", "Phone number", "01XXXXXXXXX"], ["address", "Full address", "House, road, area"], ["city", "City", "e.g. Dhaka"]].map(([k, l, ph]) => (
+            <div key={k}><label className="l">{l} *</label><input className="inp" placeholder={ph} value={form[k]} onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} /></div>
+          ))}
+          {form.city && <div className="note">{delivery === 80 ? "Dhaka delivery: ৳80" : "Outside Dhaka delivery: ৳150"}</div>}
+          <div className="box"><div className="srow"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div><div className="srow"><span>Delivery</span><span>{form.city ? `৳${delivery}` : "—"}</span></div><div className="stot"><span>Total</span><span>৳{(form.city ? total : subtotal).toLocaleString()}</span></div></div>
+          <div className="row"><button className="btn ghost block" onClick={() => nav("/cart")}>Back</button><button className="btn block" onClick={() => (formOk ? nav("/checkout/payment") : notify("Please fill in all fields", "#C0392B"))}>Continue to payment</button></div>
+        </>)}
+
+        {step === 3 && (<>
+          <p style={{ marginBottom: 16, color: "var(--muted)" }}>Total to pay: <b style={{ color: "var(--ink)" }}>৳{total.toLocaleString()}</b> (includes ৳{delivery} delivery)</p>
+          {PAYMENT_METHODS.map((m) => (
+            <div key={m.id} className={`pay ${pm === m.id ? "on" : ""}`} onClick={() => { setPm(m.id); setTxId(""); }}>
+              <span style={{ fontSize: 26 }}>{m.icon}</span>
+              <div><b style={{ color: m.color }}>{m.name}</b><div style={{ fontSize: 13, color: "var(--muted)" }}>{m.number}</div></div>
+              {pm === m.id && <b style={{ marginLeft: "auto", color: "var(--mint)" }}>✓</b>}
+            </div>
+          ))}
+          {pmObj && pmObj.needsTx && (
+            <div className="note">
+              {pm === "bank" ? "Transfer the total to the account above, then enter the reference ID." : <>Open the app and choose <b>Send Money</b> to <b>{pmObj.number}</b>, then enter the Transaction ID from the SMS.</>}
+              <input className="inp" style={{ marginTop: 10, marginBottom: 0 }} placeholder="Transaction ID" value={txId} onChange={(e) => setTxId(e.target.value.trim())} />
+            </div>
+          )}
+          {pm === "cod" && <div className="note">Pay <b>৳{total.toLocaleString()}</b> in cash when your order arrives.</div>}
+          <div className="row"><button className="btn ghost block" onClick={() => nav("/checkout/delivery")}>Back</button>
+            <button className="btn block" onClick={() => { if (!pm) return notify("Choose a payment method", "#C0392B"); if (pmObj.needsTx && !txId) return notify("Enter the Transaction ID", "#C0392B"); nav("/checkout/review"); }}>Review order</button></div>
+        </>)}
+
+        {step === 4 && (<>
+          <div className="box"><h4>Items</h4>
+            {cart.map((i) => <div key={i.id} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+            <div className="srow"><span>Delivery to {form.city}</span><span>৳{delivery}</span></div><div className="stot"><span>Total</span><span>৳{total.toLocaleString()}</span></div></div>
+          <div className="box"><h4>Delivery</h4><b>{form.name}</b> · {form.phone}<br /><span style={{ color: "var(--muted)" }}>{form.address}, {form.city}</span></div>
+          <div className="box"><h4>Payment</h4>{pmObj?.name}{txId && ` · ${txId}`}</div>
+          <div className="row"><button className="btn ghost block" onClick={() => nav("/checkout/payment")}>Back</button><button className="btn green block" onClick={place}>Place order</button></div>
+        </>)}
+      </div>
+    );
+
+  const notFound = <div className="sec"><div className="empty"><div>😿</div><b>Page not found</b>This page doesn't exist.<br /><button className="btn" onClick={() => go("/")}>Go home</button></div></div>;
+  const showFooter = !/^\/(cart|checkout|order)/.test(pathname);
+  const on = (test) => (test ? "on" : "");
 
   return (
     <div className="wrap">
@@ -479,173 +667,39 @@ export default function PawClub() {
       <header className="hdr">
         {menu && <div className="scrim show" onClick={() => setMenu(false)} />}
         <div className="hdr-in">
-          <div className="brand" onClick={home}><img src={logo} alt="Paw Club logo" /><div>Paw Club<small>Everything for happy cats</small></div></div>
-          <input className="search" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value) go("shop"); }} />
+          <div className="brand" onClick={() => go("/")}><img src={logo} alt="Paw Club logo" /><div>Paw Club<small>Everything for happy cats</small></div></div>
+          <input className="search" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value && !pathname.startsWith("/shop")) nav("/shop"); }} />
           <nav className={`nav ${menu ? "open" : ""}`}>
-            <input className="inp dsearch" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value) { setPage("shop"); setSelected(null); } }} />
-            <button className={`nav-btn ${page === "home" && !selected ? "on" : ""}`} onClick={home}>Home</button>
-            <button className={`nav-btn ${page === "shop" && !selected ? "on" : ""}`} onClick={() => go("shop")}>Shop</button>
-            <button className={`nav-btn ${page === "wish" ? "on" : ""}`} onClick={() => go("wish")}>Wishlist{wish.length ? ` (${wish.length})` : ""}</button>
-            <button className="nav-btn admin-btn" aria-label="Admin" onClick={() => { setMenu(false); setMode("login"); }}>🔧<span className="only-m"> Admin</span></button>
+            <input className="inp dsearch" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value && !pathname.startsWith("/shop")) nav("/shop"); }} />
+            <button className={`nav-btn ${on(pathname === "/")}`} onClick={() => go("/")}>Home</button>
+            <button className={`nav-btn ${on(pathname.startsWith("/shop") || pathname.startsWith("/product"))}`} onClick={() => go("/shop")}>Shop</button>
+            <button className={`nav-btn ${on(pathname === "/wishlist")}`} onClick={() => go("/wishlist")}>Wishlist{wish.length ? ` (${wish.length})` : ""}</button>
+            <button className="nav-btn admin-btn" aria-label="Admin" onClick={() => go("/admin")}>🔧<span className="only-m"> Admin</span></button>
           </nav>
-          <button className="cart-btn" onClick={() => { setDone(null); go("cart"); }}>🛒 Cart{count ? ` (${count})` : ""}</button>
+          <button className="cart-btn" onClick={() => go("/cart")}>🛒 Cart{count ? ` (${count})` : ""}</button>
           <button className="burger" aria-label={menu ? "Close menu" : "Open menu"} aria-expanded={menu} onClick={() => setMenu((m) => !m)}>{menu ? "✕" : "☰"}</button>
         </div>
       </header>
 
-      {selected && (
-        <div className="detail">
-          <button className="back" onClick={() => setSelected(null)}>← Back to products</button>
-          <div className="dgrid">
-            <div className="dimg"><Img p={selected} /></div>
-            <div>
-              <div className="card-cat">{selected.category}</div>
-              <h2 className="dname">{selected.name}</h2>
-              <div className="rate">{stars(selected.rating)}<span>{selected.rating} · {selected.reviews} reviews</span></div>
-              <p className="ddesc">{selected.description}</p>
-              <div className="price-row" style={{ marginBottom: 22 }}>
-                <span className="price" style={{ fontSize: 34 }}>৳{selected.price.toLocaleString()}</span>
-                <span className="old">৳{selected.originalPrice.toLocaleString()}</span>
-                <span className="save">Save {Math.round((1 - selected.price / selected.originalPrice) * 100)}%</span>
-              </div>
-              <div className="row" style={{ marginBottom: 20 }}><b>Quantity</b><div className="qty"><button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button><span>{qty}</span><button onClick={() => setQty((q) => q + 1)}>+</button></div></div>
-              <div className="row"><button className="btn block" onClick={() => add(selected, qty)}>Add to cart</button><button className="btn ghost block" onClick={() => { add(selected, qty); go("cart"); }}>Buy now</button></div>
-              <button className="back" style={{ marginTop: 14, marginBottom: 0 }} onClick={() => toggle(selected.id)}>{wish.includes(selected.id) ? "❤️ Saved to wishlist" : "🤍 Add to wishlist"}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Routes>
+        <Route path="/" element={homeEl} />
+        <Route path="/shop" element={shopEl} />
+        <Route path="/product/:id" element={<ProductPage products={products} wish={wish} toggle={toggle} add={add} />} />
+        <Route path="/wishlist" element={wishEl} />
+        <Route path="/cart" element={checkoutEl} />
+        <Route path="/checkout/delivery" element={checkoutEl} />
+        <Route path="/checkout/payment" element={checkoutEl} />
+        <Route path="/checkout/review" element={checkoutEl} />
+        <Route path="/order/:orderId" element={<OrderPage orders={orders} />} />
+        <Route path="*" element={notFound} />
+      </Routes>
 
-      {!selected && page === "home" && (
-        <>
-          <section className="hero">
-            <video className="hero-video" src={introVideo} autoPlay loop muted playsInline preload="auto" aria-hidden="true" tabIndex={-1} disablePictureInPicture />
-            <div className="hero-grid"><div className="hero-text">
-              <h1>Treats, toys and naps your cat will approve of 🐾</h1>
-              <p>Food, play, beds and grooming picked by cat people. Delivered across Bangladesh.</p>
-              <div className="hero-btns"><button className="btn" onClick={() => go("shop")}>Shop for your cat</button><button className="btn ghost" onClick={() => { setCategory("Toys"); go("shop"); }}>Browse toys</button></div>
-            </div></div>
-          </section>
-          <div className="strip"><div className="strip-in">{[0,1,2,3].map((k) => <span key={k}>🐾 Purr-fect picks 🐟 Treats 🧶 Toys 🛏️ Naps 💖 Cat approved</span>)}</div></div>
-          <div className="perks"><div className="perks-in">
-            {[["🚚", "Fast delivery", "Dhaka ৳80 · Outside ৳150"], ["✅", "Vet-approved picks", "Safe for everyday use"], ["💳", "Easy payment", "bKash, Nagad, COD"], ["💬", "Cat-parent support", "We reply within hours"]].map(([i, t, s]) => <div key={t} className="perk"><span>{i}</span><div>{t}<small>{s}</small></div></div>)}
-          </div></div>
-          <div className="sec">
-            <h2>Cat favourites 💖</h2><p className="sub">What other cat parents keep re-ordering</p>
-            {grid(products.filter((p) => p.badge).slice(0, 8))}
-            <div style={{ textAlign: "center", marginTop: 32 }}><button className="btn" onClick={() => go("shop")}>See all products</button></div>
-          </div>
-          <div className="band"><div className="sec">
-            <h2>Shop by category 🐾</h2><p className="sub">Jump straight to what your cat needs</p>
-            <div className="cats">{cats.map((c) => <div key={c} className="cat" onClick={() => { setCategory(c); go("shop"); }}><div>{catIcons[c] || "🐾"}</div><b>{c}</b><small>{products.filter((p) => p.category === c).length} products</small></div>)}</div>
-          </div></div>
-        </>
-      )}
-
-      {!selected && page === "shop" && (
-        <div className="sec">
-          <h2>All cat supplies</h2><p className="sub">{shown.length} products</p>
-          <input className="inp" style={{ maxWidth: 380 }} placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="tabs">{["All", ...cats].map((c) => <button key={c} className={`tab ${category === c ? "on" : ""}`} onClick={() => setCategory(c)}>{c}</button>)}</div>
-          {grid(shown)}
-          {shown.length === 0 && <div className="empty"><div>😿</div><b>No products found</b>Try another search or category.<br /><button className="btn" onClick={() => { setSearch(""); setCategory("All"); }}>Clear filters</button></div>}
-        </div>
-      )}
-
-      {!selected && page === "wish" && (
-        <div className="sec">
-          <h2>Wishlist</h2><p className="sub">Saved for later</p>
-          {wish.length === 0 ? <div className="empty"><div>🤍</div><b>Nothing saved yet</b>Tap the heart on any product to save it.<br /><button className="btn" onClick={() => go("shop")}>Browse products</button></div> : grid(products.filter((p) => wish.includes(p.id)))}
-        </div>
-      )}
-
-      {!selected && page === "cart" && (
-        <div className="cart">
-          {done ? (
-            <div className="receipt" style={{ padding: 0 }}>
-              <div className="rhead"><div className="ok">✓</div><h2>Order placed</h2><p style={{ color: "#E6EBD9" }}>Thank you for shopping with Paw Club</p></div>
-              <div className="rbody">
-                <div className="oid">{done.orderId}</div>
-                <div className="box"><h4>Delivering to</h4><div style={{ lineHeight: 1.8 }}><b>{done.customer.name}</b> · {done.customer.phone}<br />{done.customer.address}, {done.customer.city}</div></div>
-                <div className="box"><h4>Items</h4>
-                  {done.items.map((i, k) => <div key={k} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
-                  <div className="srow"><span>Delivery</span><span>৳{done.delivery}</span></div>
-                  <div className="stot"><span>Total</span><span style={{ color: "var(--green)" }}>৳{done.total.toLocaleString()}</span></div>
-                </div>
-                <div className="srow"><span>Payment</span><b>{done.payment.method}{done.payment.txId && ` · ${done.payment.txId}`}</b></div>
-                <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14, lineHeight: 1.7 }}>We will call <b>{done.customer.phone}</b> to confirm. Expected delivery: 2–4 business days.</p>
-              </div>
-              <button className="btn block" onClick={home}>Continue shopping</button>
-            </div>
-          ) : cart.length === 0 ? (
-            <div className="empty"><div>🛒</div><b>Your cart is empty</b>Add something your cat will love.<br /><button className="btn" onClick={() => go("shop")}>Start shopping</button></div>
-          ) : (
-            <>
-              <h2 style={{ fontFamily: "var(--display)", fontSize: 32, color: "var(--green)" }}>Checkout</h2>
-              <div className="steps">{["Cart", "Delivery", "Payment", "Confirm"].map((s, i) => <div key={s} className={`step ${step === i + 1 ? "on" : ""} ${step > i + 1 ? "done" : ""}`}>{step > i + 1 ? "✓ " : ""}{s}</div>)}</div>
-
-              {step === 1 && (<>
-                {cart.map((i) => (
-                  <div key={i.id} className="item">
-                    <div className="item-img"><Img p={i} /></div>
-                    <div className="item-info"><b>{i.name}</b><div style={{ color: "var(--green)", fontWeight: 700 }}>৳{i.price.toLocaleString()}</div></div>
-                    <div className="qty"><button onClick={() => setQ(i.id, i.qty - 1)}>−</button><span>{i.qty}</span><button onClick={() => setQ(i.id, i.qty + 1)}>+</button></div>
-                    <b style={{ minWidth: 70, textAlign: "right" }}>৳{(i.price * i.qty).toLocaleString()}</b>
-                    <button className="back" style={{ margin: 0 }} aria-label="Remove" onClick={() => setQ(i.id, 0)}>🗑</button>
-                  </div>
-                ))}
-                <div className="box"><div className="srow"><span>Delivery</span><span>Calculated next step</span></div><div className="stot"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div>
-                  <button className="btn block" style={{ marginTop: 16 }} onClick={() => setStep(2)}>Continue to delivery</button></div>
-              </>)}
-
-              {step === 2 && (<>
-                {[["name", "Full name", ""], ["phone", "Phone number", "01XXXXXXXXX"], ["address", "Full address", "House, road, area"], ["city", "City", "e.g. Dhaka"]].map(([k, l, ph]) => (
-                  <div key={k}><label className="l">{l} *</label><input className="inp" placeholder={ph} value={form[k]} onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} /></div>
-                ))}
-                {form.city && <div className="note">{delivery === 80 ? "Dhaka delivery: ৳80" : "Outside Dhaka delivery: ৳150"}</div>}
-                <div className="box"><div className="srow"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div><div className="srow"><span>Delivery</span><span>{form.city ? `৳${delivery}` : "—"}</span></div><div className="stot"><span>Total</span><span>৳{(form.city ? total : subtotal).toLocaleString()}</span></div></div>
-                <div className="row"><button className="btn ghost block" onClick={() => setStep(1)}>Back</button><button className="btn block" onClick={() => (form.name && form.phone && form.address && form.city ? setStep(3) : notify("Please fill in all fields", "#C0392B"))}>Continue to payment</button></div>
-              </>)}
-
-              {step === 3 && (<>
-                <p style={{ marginBottom: 16, color: "var(--muted)" }}>Total to pay: <b style={{ color: "var(--ink)" }}>৳{total.toLocaleString()}</b> (includes ৳{delivery} delivery)</p>
-                {PAYMENT_METHODS.map((m) => (
-                  <div key={m.id} className={`pay ${pm === m.id ? "on" : ""}`} onClick={() => { setPm(m.id); setTxId(""); }}>
-                    <span style={{ fontSize: 26 }}>{m.icon}</span>
-                    <div><b style={{ color: m.color }}>{m.name}</b><div style={{ fontSize: 13, color: "var(--muted)" }}>{m.number}</div></div>
-                    {pm === m.id && <b style={{ marginLeft: "auto", color: "var(--mint)" }}>✓</b>}
-                  </div>
-                ))}
-                {pm && PAYMENT_METHODS.find((m) => m.id === pm).needsTx && (
-                  <div className="note">
-                    {pm === "bank" ? "Transfer the total to the account above, then enter the reference ID." : <>Open the app and choose <b>Send Money</b> to <b>{PAYMENT_METHODS.find((m) => m.id === pm).number}</b>, then enter the Transaction ID from the SMS.</>}
-                    <input className="inp" style={{ marginTop: 10, marginBottom: 0 }} placeholder="Transaction ID" value={txId} onChange={(e) => setTxId(e.target.value.trim())} />
-                  </div>
-                )}
-                {pm === "cod" && <div className="note">Pay <b>৳{total.toLocaleString()}</b> in cash when your order arrives.</div>}
-                <div className="row"><button className="btn ghost block" onClick={() => setStep(2)}>Back</button>
-                  <button className="btn block" onClick={() => { if (!pm) return notify("Choose a payment method", "#C0392B"); if (PAYMENT_METHODS.find((m) => m.id === pm).needsTx && !txId) return notify("Enter the Transaction ID", "#C0392B"); setStep(4); }}>Review order</button></div>
-              </>)}
-
-              {step === 4 && (<>
-                <div className="box"><h4>Items</h4>
-                  {cart.map((i) => <div key={i.id} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
-                  <div className="srow"><span>Delivery to {form.city}</span><span>৳{delivery}</span></div><div className="stot"><span>Total</span><span>৳{total.toLocaleString()}</span></div></div>
-                <div className="box"><h4>Delivery</h4><b>{form.name}</b> · {form.phone}<br /><span style={{ color: "var(--muted)" }}>{form.address}, {form.city}</span></div>
-                <div className="box"><h4>Payment</h4>{PAYMENT_METHODS.find((m) => m.id === pm)?.name}{txId && ` · ${txId}`}</div>
-                <div className="row"><button className="btn ghost block" onClick={() => setStep(3)}>Back</button><button className="btn green block" onClick={place}>Place order</button></div>
-              </>)}
-            </>
-          )}
-        </div>
-      )}
-
-      {!selected && page !== "cart" && (
+      {showFooter && (
         <footer className="foot">
           <div className="foot-grid">
             <div><h5>Paw Club</h5><p>Quality food, toys and comfort for cats and the people who love them.</p></div>
             <div><h5>Contact</h5><p>📞 01XXXXXXXXX</p><p>✉️ hello@pawclub.com.bd</p><p>📍 Your shop address, Dhaka</p></div>
-            <div><h5>Categories</h5>{cats.map((c) => <a key={c} onClick={() => { setCategory(c); go("shop"); }}>{c}</a>)}</div>
+            <div><h5>Categories</h5>{cats.map((c) => <a key={c} onClick={() => go(shopLink(c))}>{c}</a>)}</div>
             <div><h5>Payment</h5>{PAYMENT_METHODS.map((m) => <p key={m.id}>{m.icon} {m.name}</p>)}</div>
           </div>
           <div className="foot-b">Made with ❤️ in Bangladesh</div>
@@ -653,4 +707,9 @@ export default function PawClub() {
       )}
     </div>
   );
+}
+
+// If you host on GitHub Pages, swap BrowserRouter for HashRouter (see notes).
+export default function PawClub() {
+  return <HashRouter><PawClubApp /></HashRouter>;
 }
