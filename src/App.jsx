@@ -1,29 +1,22 @@
 import { useState, useEffect, useRef } from "react";
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { Turnstile } from "@marsidev/react-turnstile";
+import { supabase } from "./supabase";
 import logo from "./assets/logoo.png"; // replace this file when your new logo is ready
 import introVideo from "./assets/intro_video.mp4"; // hero intro video
 
-const ADMIN_PASSWORD = "pawclub2026"; // change this
+// Admin needs password + authenticator code. If you cannot get 2FA working yet, set this to false
+// temporarily (and relax is_admin() in SQL, see the notes), then set it back to true.
+const REQUIRE_MFA = true;
+const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITEKEY;
+
 const DEFAULT_CATEGORIES = ["Food", "Toys", "Beds & Trees", "Litter", "Grooming", "Accessories"];
+const CITIES = ["Dhaka", "Chattogram", "Sylhet", "Rajshahi", "Khulna", "Barishal", "Rangpur", "Mymensingh", "Gazipur", "Narayanganj", "Other"];
+const PHONE_RE = /^01[3-9]\d{8}$/;
 const BADGES = ["", "Best Seller", "New", "Cat Favorite", "Hot Deal"];
 const EMOJIS = ["🐟", "🍗", "🧶", "🐭", "🛏️", "🏠", "🪣", "🧼", "🧴", "🪮", "🎀", "🔔", "🥣", "🧳", "🐾", "🐱", "🦴", "🎣"];
 const badgeColors = { "Best Seller": "#1E5B3A", New: "#D99A1E", "Cat Favorite": "#D9677A", "Hot Deal": "#C8642B" };
 const catIcons = { Food: "🍗", Toys: "🧶", "Beds & Trees": "🛏️", Litter: "🪣", Grooming: "🪮", Accessories: "🎀" };
-
-const DEFAULT_PRODUCTS = [
-  { id: 1, name: "Tuna & Chicken Kibble 2kg", category: "Food", price: 1450, originalPrice: 1800, image: "🍗", rating: 4.8, reviews: 212, badge: "Best Seller", description: "Grain-free dry food for adult cats with real tuna and chicken. Supports a shiny coat and healthy digestion." },
-  { id: 2, name: "Wet Food Pouches (12 pack)", category: "Food", price: 980, originalPrice: 1200, image: "🐟", rating: 4.6, reviews: 144, badge: null, description: "Soft, gravy-rich ocean fish pouches. Great as a topper or a full meal." },
-  { id: 3, name: "Feather Wand Teaser", category: "Toys", price: 320, originalPrice: 450, image: "🎣", rating: 4.7, reviews: 301, badge: "Cat Favorite", description: "Extendable wand with replaceable feathers and a bell. Perfect for daily play sessions." },
-  { id: 4, name: "Crinkle Mouse Set (6 pcs)", category: "Toys", price: 280, originalPrice: 380, image: "🐭", rating: 4.4, reviews: 97, badge: null, description: "Six soft mice with catnip pockets and crinkly tails." },
-  { id: 5, name: "Cloud Donut Bed", category: "Beds & Trees", price: 1850, originalPrice: 2300, image: "🛏️", rating: 4.9, reviews: 158, badge: "New", description: "Ultra-soft calming bed with a raised rim. Machine washable." },
-  { id: 6, name: "3-Level Cat Tree", category: "Beds & Trees", price: 5400, originalPrice: 6500, image: "🏠", rating: 4.6, reviews: 63, badge: null, description: "Sisal-wrapped scratching posts, two perches and a hideaway cave. 110cm tall." },
-  { id: 7, name: "Clumping Litter 10L", category: "Litter", price: 750, originalPrice: 950, image: "🪣", rating: 4.5, reviews: 276, badge: "Hot Deal", description: "Low-dust, fast-clumping bentonite litter with light lavender scent." },
-  { id: 8, name: "Deshedding Brush", category: "Grooming", price: 520, originalPrice: 700, image: "🪮", rating: 4.5, reviews: 88, badge: null, description: "Self-cleaning slicker brush that lifts loose fur without pulling." },
-  { id: 9, name: "Gentle Cat Shampoo 250ml", category: "Grooming", price: 460, originalPrice: 590, image: "🧴", rating: 4.3, reviews: 52, badge: null, description: "Tear-free oatmeal shampoo for sensitive skin." },
-  { id: 10, name: "Breakaway Collar + Bell", category: "Accessories", price: 240, originalPrice: 350, image: "🔔", rating: 4.4, reviews: 120, badge: null, description: "Safety-release collar in soft nylon, adjustable from 20–30cm." },
-  { id: 11, name: "Travel Carrier Backpack", category: "Accessories", price: 2600, originalPrice: 3200, image: "🧳", rating: 4.7, reviews: 41, badge: "New", description: "Ventilated bubble-window backpack for vet visits and short trips." },
-  { id: 12, name: "Slow Feeder Bowl", category: "Accessories", price: 390, originalPrice: 520, image: "🥣", rating: 4.6, reviews: 77, badge: null, description: "Maze-patterned ceramic bowl that slows down fast eaters." },
-];
 
 const PAYMENT_METHODS = [
   { id: "bkash", name: "bKash", color: "#E2136E", icon: "📱", number: "01XXXXXXXXX", needsTx: true },
@@ -34,7 +27,22 @@ const PAYMENT_METHODS = [
 
 const getDelivery = (city) => (!city ? 80 : city.trim().toLowerCase() === "dhaka" ? 80 : 150);
 const stars = (r) => "★".repeat(Math.round(r)) + "☆".repeat(5 - Math.round(r));
-const orderId = () => "PC" + Date.now().toString().slice(-8);
+const pct = (p) => (p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : 0);
+const load = (k, d) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : d; } catch { return d; } };
+
+// ---------- database <-> app shape ----------
+const fromDb = (r) => ({ ...r, originalPrice: r.original_price, imageData: r.image_url });
+const toDb = (p) => ({
+  name: p.name, category: p.category, price: p.price, original_price: p.originalPrice,
+  image: p.image, image_url: p.imageData || null, rating: p.rating, reviews: p.reviews,
+  badge: p.badge || null, description: p.description,
+});
+const fromOrder = (o) => ({
+  ...o,
+  orderId: o.code,
+  payment: { method: o.payment_method, txId: o.tx_id || "" },
+  placedAt: new Date(o.created_at).getTime(),
+});
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Quicksand:wght@500;600;700&display=swap');
@@ -60,6 +68,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .btn{background:var(--accent);color:var(--ink);border:3px solid var(--ink);box-shadow:var(--pop);padding:11px 26px;border-radius:999px;font-weight:700;font-size:15px;cursor:pointer;transition:transform .15s,box-shadow .15s}
 .btn:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 var(--ink)}
 .btn:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--ink)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:var(--pop)}
 .btn.ghost{background:#fff}.btn.ghost:hover{background:var(--lav)}
 .btn.green{background:var(--green);color:#FFF6D8}.btn.block{width:100%}
 
@@ -241,7 +250,7 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 const Img = ({ p }) => (p.imageData ? <img src={p.imageData} alt={p.name} /> : <span>{p.image}</span>);
 
 function Card({ p, onView, onAdd, wish, toggle }) {
-  const off = Math.round((1 - p.price / p.originalPrice) * 100);
+  const off = pct(p);
   return (
     <div className="card" onClick={onView}>
       <div className="card-img">
@@ -255,8 +264,8 @@ function Card({ p, onView, onAdd, wish, toggle }) {
         <div className="rate">{stars(p.rating)}<span>({p.reviews})</span></div>
         <div className="price-row">
           <span className="price">৳{p.price.toLocaleString()}</span>
-          <span className="old">৳{p.originalPrice.toLocaleString()}</span>
-          <span className="save">−{off}%</span>
+          {off > 0 && <span className="old">৳{p.originalPrice.toLocaleString()}</span>}
+          {off > 0 && <span className="save">−{off}%</span>}
         </div>
         <button className="add" onClick={(e) => { e.stopPropagation(); onAdd(); }}>Add to cart</button>
       </div>
@@ -264,31 +273,54 @@ function Card({ p, onView, onAdd, wish, toggle }) {
   );
 }
 
+// Shrinks a photo in the browser before upload (max 800px, WebP) so it stays well under the 1 MB limit.
+const compress = async (file, max = 800) => {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas");
+  c.width = Math.round(bmp.width * k);
+  c.height = Math.round(bmp.height * k);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((res) => c.toBlob(res, "image/webp", 0.8));
+};
+
 function ProductModal({ product, onSave, onClose, categories }) {
   const [f, setF] = useState(product ? { ...product } : { name: "", category: categories[0], price: "", originalPrice: "", image: "🐾", rating: 4.5, reviews: 0, badge: "", description: "" });
   const [newCat, setNewCat] = useState(false);
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef();
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  const upload = (file) => {
+  const upload = async (file) => {
     if (!file || !file.type.startsWith("image/")) return;
-    const r = new FileReader();
-    r.onload = (e) => set("imageData", e.target.result);
-    r.readAsDataURL(file);
+    setBusy(true);
+    try {
+      const blob = await compress(file);
+      const path = `${crypto.randomUUID()}.webp`;
+      const { error } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/webp" });
+      if (error) { alert("Upload failed: " + error.message); return; }
+      set("imageData", supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl);
+    } catch (e) {
+      alert("Could not process that image.");
+    } finally {
+      setBusy(false);
+    }
   };
   const save = () => {
-    if (!f.name || !f.price || !f.originalPrice || !f.category) return alert("Please fill name, category and both prices.");
-    onSave({ ...f, price: +f.price, originalPrice: +f.originalPrice, rating: +f.rating, reviews: +f.reviews, badge: f.badge || null, id: f.id || Date.now() });
+    const price = Math.round(+f.price), originalPrice = Math.round(+f.originalPrice);
+    if (!f.name || !f.category || !(price > 0) || !(originalPrice > 0)) return alert("Please fill name, category and both prices.");
+    if (originalPrice < price) return alert("Original price must be the same as or higher than the sale price.");
+    onSave({ ...f, price, originalPrice, rating: +f.rating, reviews: Math.round(+f.reviews) || 0, badge: f.badge || null });
   };
   return (
     <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mbox">
         <h3>{product ? "Edit product" : "Add product"}</h3>
         <div className="mgrid">
-          <div className="full"><label className="l">Name *</label><input className="inp" value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
+          <div className="full"><label className="l">Name *</label><input className="inp" maxLength={120} value={f.name} onChange={(e) => set("name", e.target.value)} /></div>
           <div>
             <label className="l">Category *</label>
             {newCat ? (
-              <input className="inp" autoFocus placeholder="New category name" value={f.category} onChange={(e) => set("category", e.target.value)} />
+              <input className="inp" autoFocus maxLength={40} placeholder="New category name" value={f.category} onChange={(e) => set("category", e.target.value)} />
             ) : (
               <select className="inp" value={f.category} onChange={(e) => e.target.value === "__n" ? (setNewCat(true), set("category", "")) : set("category", e.target.value)}>
                 {categories.map((c) => <option key={c}>{c}</option>)}
@@ -297,20 +329,20 @@ function ProductModal({ product, onSave, onClose, categories }) {
             )}
           </div>
           <div><label className="l">Badge</label><select className="inp" value={f.badge || ""} onChange={(e) => set("badge", e.target.value)}>{BADGES.map((b) => <option key={b} value={b}>{b || "None"}</option>)}</select></div>
-          <div><label className="l">Sale price (৳) *</label><input className="inp" type="number" value={f.price} onChange={(e) => set("price", e.target.value)} /></div>
-          <div><label className="l">Original price (৳) *</label><input className="inp" type="number" value={f.originalPrice} onChange={(e) => set("originalPrice", e.target.value)} /></div>
-          <div className="full"><label className="l">Description</label><textarea className="inp" rows={3} value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
+          <div><label className="l">Sale price (৳) *</label><input className="inp" type="number" min="1" value={f.price} onChange={(e) => set("price", e.target.value)} /></div>
+          <div><label className="l">Original price (৳) *</label><input className="inp" type="number" min="1" value={f.originalPrice} onChange={(e) => set("originalPrice", e.target.value)} /></div>
+          <div className="full"><label className="l">Description</label><textarea className="inp" rows={3} maxLength={1000} value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
           <div className="full">
             <label className="l">Image</label>
             <div className="emoji">{EMOJIS.map((em) => <span key={em} className={!f.imageData && f.image === em ? "on" : ""} onClick={() => { set("image", em); set("imageData", null); }}>{em}</span>)}</div>
             <div className="row" style={{ marginBottom: 14 }}>
-              <button className="sm e" onClick={() => fileRef.current.click()}>📷 Upload photo</button>
+              <button className="sm e" disabled={busy} onClick={() => fileRef.current.click()}>{busy ? "Uploading…" : "📷 Upload photo"}</button>
               {f.imageData && <><img src={f.imageData} alt="" style={{ height: 44, borderRadius: 8 }} /><button className="sm d" onClick={() => set("imageData", null)}>Remove</button></>}
-              <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => upload(e.target.files[0])} />
+              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { upload(e.target.files[0]); e.target.value = ""; }} />
             </div>
           </div>
         </div>
-        <div className="row"><button className="btn ghost block" onClick={onClose}>Cancel</button><button className="btn block" onClick={save}>{product ? "Save changes" : "Add product"}</button></div>
+        <div className="row"><button className="btn ghost block" onClick={onClose}>Cancel</button><button className="btn block" disabled={busy} onClick={save}>{product ? "Save changes" : "Add product"}</button></div>
       </div>
     </div>
   );
@@ -348,8 +380,30 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
   const cats = [...new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category)])];
   const fp = products.filter((p) => (p.name + p.category).toLowerCase().includes(q.toLowerCase()));
   const fo = orders.filter((o) => (o.orderId + o.customer.name + o.customer.phone).toLowerCase().includes(q.toLowerCase())).sort((a, b) => b.placedAt - a.placedAt);
-  const save = (p) => { setProducts((prev) => modal === "add" ? [...prev, p] : prev.map((x) => (x.id === p.id ? p : x))); setModal(null); };
-  const status = (id, s) => { setOrders((prev) => prev.map((o) => (o.orderId === id ? { ...o, status: s } : o))); setSel((o) => (o && o.orderId === id ? { ...o, status: s } : o)); };
+
+  const save = async (p) => {
+    const isNew = modal === "add";
+    const { data, error } = isNew
+      ? await supabase.from("products").insert(toDb(p)).select().single()
+      : await supabase.from("products").update(toDb(p)).eq("id", p.id).select().single();
+    if (error) return alert("Could not save: " + error.message);
+    const saved = fromDb(data);
+    setProducts((prev) => (isNew ? [...prev, saved] : prev.map((x) => (x.id === saved.id ? saved : x))));
+    setModal(null);
+  };
+  const removeProduct = async (id) => {
+    if (!window.confirm("Delete this product?")) return;
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) return alert("Could not delete: " + error.message);
+    setProducts((prev) => prev.filter((x) => x.id !== id));
+  };
+  const status = async (code, s) => {
+    const { error } = await supabase.from("orders").update({ status: s }).eq("code", code);
+    if (error) return alert("Could not update status: " + error.message);
+    setOrders((prev) => prev.map((o) => (o.orderId === code ? { ...o, status: s } : o)));
+    setSel((o) => (o && o.orderId === code ? { ...o, status: s } : o));
+  };
+
   const pending = orders.filter((o) => o.status === "Pending").length;
   return (
     <div className="adm">
@@ -383,7 +437,7 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
                     <td><b>{p.image} {p.name}</b></td><td>{p.category}</td>
                     <td>৳{p.price.toLocaleString()} <s style={{ color: "var(--faint)" }}>৳{p.originalPrice.toLocaleString()}</s></td>
                     <td>{p.badge || "—"}</td>
-                    <td><button className="sm e" onClick={() => setModal(p)}>Edit</button><button className="sm d" onClick={() => window.confirm("Delete this product?") && setProducts((prev) => prev.filter((x) => x.id !== p.id))}>Delete</button></td>
+                    <td><button className="sm e" onClick={() => setModal(p)}>Edit</button><button className="sm d" onClick={() => removeProduct(p.id)}>Delete</button></td>
                   </tr>
                 ))}
                 {fp.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--faint)" }}>No products match your search.</td></tr>}
@@ -397,7 +451,7 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
                   <tr key={o.orderId}>
                     <td><b style={{ color: "var(--green)" }}>{o.orderId}</b><br /><small>{new Date(o.placedAt).toLocaleDateString()}</small></td>
                     <td>{o.customer.name}<br /><small>📞 {o.customer.phone} · {o.customer.city}</small></td>
-                    <td><b>৳{o.total.toLocaleString()}</b></td><td>{o.payment.method}</td>
+                    <td><b>৳{o.total.toLocaleString()}</b></td><td>{o.payment.method}{o.payment.txId && <><br /><small>{o.payment.txId}</small></>}</td>
                     <td><span style={{ color: STATUS[o.status], fontWeight: 700 }}>{o.status}</span></td>
                     <td><button className="sm v" onClick={() => setSel(o)}>View</button></td>
                   </tr>
@@ -412,16 +466,96 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
   );
 }
 
+// Admin sign in: email + password, then a 6-digit code from your authenticator app.
+// The first time, it shows a QR code so you can link your authenticator app.
+function AdminGate({ onDone, onBack }) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [code, setCode] = useState("");
+  const [stage, setStage] = useState("login"); // login | enroll | verify
+  const [msg, setMsg] = useState("");
+  const [qr, setQr] = useState("");
+  const [secret, setSecret] = useState("");
+  const [fid, setFid] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const startMfa = async () => {
+    const { data: f, error } = await supabase.auth.mfa.listFactors();
+    if (error) return setMsg(error.message);
+    const verified = f?.totp?.[0];
+    if (verified) { setFid(verified.id); setStage("verify"); return; }
+    // remove half-finished enrollments from earlier attempts
+    for (const x of f?.all ?? []) {
+      if (x.factor_type === "totp" && x.status === "unverified") await supabase.auth.mfa.unenroll({ factorId: x.id });
+    }
+    const { data, error: e2 } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "admin-" + Date.now() });
+    if (e2) return setMsg("Could not start 2FA setup: " + e2.message);
+    setFid(data.id);
+    setQr(data.totp.qr_code);
+    setSecret(data.totp.secret);
+    setStage("enroll");
+  };
+
+  // If you are already signed in with a password but have not entered the code yet, continue from there.
+  useEffect(() => {
+    if (!REQUIRE_MFA) return;
+    supabase.auth.getSession().then(({ data }) => { if (data.session) startMfa(); });
+  }, []);
+
+  const login = async () => {
+    setBusy(true); setMsg("");
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+    setBusy(false); setPw("");
+    if (error) return setMsg("Wrong email or password.");
+    if (!REQUIRE_MFA) return onDone();
+    await startMfa();
+  };
+  const verify = async () => {
+    setBusy(true); setMsg("");
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: fid, code: code.trim() });
+    setBusy(false);
+    if (error) { setCode(""); return setMsg("Wrong or expired code. Try again."); }
+    onDone();
+  };
+  const switchAccount = async () => { await supabase.auth.signOut(); setStage("login"); setMsg(""); setCode(""); };
+
+  return (
+    <div className="login"><div className="login-card">
+      <div style={{ fontSize: 40 }}>🐾</div><h2>Admin sign in</h2>
+      {msg && <p style={{ color: "#C0392B", marginBottom: 10 }}>{msg}</p>}
+      {stage === "login" && <>
+        <input className="inp" type="email" placeholder="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="inp" type="password" placeholder="Password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && login()} />
+        <button className="btn block" disabled={busy} onClick={login}>{busy ? "Signing in…" : "Continue"}</button>
+      </>}
+      {stage === "enroll" && <>
+        <p style={{ marginBottom: 10, lineHeight: 1.6 }}>One-time setup: scan this QR code with your authenticator app, then enter the 6-digit code it shows.</p>
+        <img src={qr} alt="Authenticator QR code" style={{ width: "100%", marginBottom: 8 }} />
+        <p style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12, wordBreak: "break-all" }}>Can't scan? Enter this key manually: <b>{secret}</b></p>
+      </>}
+      {stage === "verify" && <p style={{ marginBottom: 10 }}>Enter the 6-digit code from your authenticator app.</p>}
+      {(stage === "enroll" || stage === "verify") && <>
+        <input className="inp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} onKeyDown={(e) => e.key === "Enter" && verify()} />
+        <button className="btn block" disabled={busy || code.length !== 6} onClick={verify}>{busy ? "Checking…" : "Verify"}</button>
+        <button className="nav-btn" style={{ marginTop: 10 }} onClick={switchAccount}>Use a different account</button>
+      </>}
+      <button className="nav-btn" style={{ marginTop: 10 }} onClick={onBack}>Back to shop</button>
+    </div></div>
+  );
+}
+
 const shopLink = (c) => (c && c !== "All" ? `/shop?category=${encodeURIComponent(c)}` : "/shop");
 
-function ProductPage({ products, wish, toggle, add }) {
+function ProductPage({ products, loaded, wish, toggle, add }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [qty, setQty] = useState(1);
   useEffect(() => setQty(1), [id]);
   const selected = products.find((p) => String(p.id) === id);
+  if (!loaded) return <div className="sec"><div className="empty"><div>🐾</div><b>Loading…</b></div></div>;
   if (!selected)
     return <div className="sec"><div className="empty"><div>😿</div><b>Product not found</b>It may have been removed.<br /><button className="btn" onClick={() => nav("/shop")}>Browse products</button></div></div>;
+  const off = pct(selected);
   return (
     <div className="detail">
       <button className="back" onClick={() => nav("/shop")}>← Back to products</button>
@@ -434,10 +568,10 @@ function ProductPage({ products, wish, toggle, add }) {
           <p className="ddesc">{selected.description}</p>
           <div className="price-row" style={{ marginBottom: 22 }}>
             <span className="price" style={{ fontSize: 34 }}>৳{selected.price.toLocaleString()}</span>
-            <span className="old">৳{selected.originalPrice.toLocaleString()}</span>
-            <span className="save">Save {Math.round((1 - selected.price / selected.originalPrice) * 100)}%</span>
+            {off > 0 && <span className="old">৳{selected.originalPrice.toLocaleString()}</span>}
+            {off > 0 && <span className="save">Save {off}%</span>}
           </div>
-          <div className="row" style={{ marginBottom: 20 }}><b>Quantity</b><div className="qty"><button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button><span>{qty}</span><button onClick={() => setQty((q) => q + 1)}>+</button></div></div>
+          <div className="row" style={{ marginBottom: 20 }}><b>Quantity</b><div className="qty"><button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button><span>{qty}</span><button onClick={() => setQty((q) => Math.min(20, q + 1))}>+</button></div></div>
           <div className="row"><button className="btn block" onClick={() => add(selected, qty)}>Add to cart</button><button className="btn ghost block" onClick={() => { add(selected, qty); nav("/cart"); }}>Buy now</button></div>
           <button className="back" style={{ marginTop: 14, marginBottom: 0 }} onClick={() => toggle(selected.id)}>{wish.includes(selected.id) ? "❤️ Saved to wishlist" : "🤍 Add to wishlist"}</button>
         </div>
@@ -446,26 +580,33 @@ function ProductPage({ products, wish, toggle, add }) {
   );
 }
 
-function OrderPage({ orders }) {
+// Confirmation page: reads the order through the safe get_order() database function.
+// It only returns the name and city, never the full phone number or street address.
+function OrderPage() {
   const { orderId } = useParams();
   const nav = useNavigate();
-  const done = orders.find((o) => o.orderId === orderId);
+  const [done, setDone] = useState(undefined); // undefined = loading, null = not found
+  useEffect(() => {
+    supabase.rpc("get_order", { oid: orderId }).then(({ data, error }) => setDone(error ? null : data?.[0] ?? null));
+  }, [orderId]);
+  if (done === undefined)
+    return <div className="cart"><div className="empty"><div>🧾</div><b>Loading your order…</b></div></div>;
   if (!done)
-    return <div className="cart"><div className="empty"><div>🧾</div><b>Order not found</b>We couldn't find that order on this device.<br /><button className="btn" onClick={() => nav("/")}>Go home</button></div></div>;
+    return <div className="cart"><div className="empty"><div>🧾</div><b>Order not found</b>We couldn't find that order.<br /><button className="btn" onClick={() => nav("/")}>Go home</button></div></div>;
   return (
     <div className="cart">
       <div className="receipt" style={{ padding: 0 }}>
         <div className="rhead"><div className="ok">✓</div><h2>Order placed</h2><p style={{ color: "#E6EBD9" }}>Thank you for shopping with Paw Club</p></div>
         <div className="rbody">
-          <div className="oid">{done.orderId}</div>
-          <div className="box"><h4>Delivering to</h4><div style={{ lineHeight: 1.8 }}><b>{done.customer.name}</b> · {done.customer.phone}<br />{done.customer.address}, {done.customer.city}</div></div>
+          <div className="oid">{done.code}</div>
+          <div className="box"><h4>Delivering to</h4><div style={{ lineHeight: 1.8 }}><b>{done.name}</b> · {done.city}</div></div>
           <div className="box"><h4>Items</h4>
             {done.items.map((i, k) => <div key={k} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
             <div className="srow"><span>Delivery</span><span>৳{done.delivery}</span></div>
             <div className="stot"><span>Total</span><span style={{ color: "var(--green)" }}>৳{done.total.toLocaleString()}</span></div>
           </div>
-          <div className="srow"><span>Payment</span><b>{done.payment.method}{done.payment.txId && ` · ${done.payment.txId}`}</b></div>
-          <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14, lineHeight: 1.7 }}>We will call <b>{done.customer.phone}</b> to confirm. Expected delivery: 2–4 business days.</p>
+          <div className="srow"><span>Payment</span><b>{done.payment_method}</b></div>
+          <p style={{ marginTop: 14, color: "var(--muted)", fontSize: 14, lineHeight: 1.7 }}>We will call the phone number you gave us to confirm. Expected delivery: 2–4 business days. Keep your order code <b>{done.code}</b> handy.</p>
         </div>
         <button className="btn block" onClick={() => nav("/")}>Continue shopping</button>
       </div>
@@ -474,27 +615,71 @@ function OrderPage({ orders }) {
 }
 
 function PawClubApp() {
-  const load = (k, d) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : d; } catch { return d; } };
   const nav = useNavigate();
   const { pathname } = useLocation();
   const [sp] = useSearchParams();
   const category = sp.get("category") || "All";
-  const [authed, setAuthed] = useState(false);
-  const [pw, setPw] = useState("");
-  const [pwErr, setPwErr] = useState(false);
-  const [products, setProducts] = useState(() => load("pc_products", DEFAULT_PRODUCTS));
-  const [orders, setOrders] = useState(() => load("pc_orders", []));
-  const [cart, setCart] = useState([]);
-  const [wish, setWish] = useState([]);
+
+  const [products, setProducts] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);
+  const [orders, setOrders] = useState([]);
+  const [session, setSession] = useState(null);
+  const [aal, setAal] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [cart, setCart] = useState(() => load("pc_cart", []));
+  const [wish, setWish] = useState(() => load("pc_wish", []));
   const [search, setSearch] = useState("");
   const [pm, setPm] = useState("");
   const [txId, setTxId] = useState("");
   const [form, setForm] = useState({ name: "", phone: "", address: "", city: "" });
   const [toast, setToast] = useState(null);
   const [menu, setMenu] = useState(false); // mobile side menu
+  const [token, setToken] = useState(""); // Turnstile bot-check token
+  const [tsKey, setTsKey] = useState(0);
+  const [placing, setPlacing] = useState(false);
 
-  useEffect(() => { try { localStorage.setItem("pc_products", JSON.stringify(products)); } catch {} }, [products]);
-  useEffect(() => { try { localStorage.setItem("pc_orders", JSON.stringify(orders)); } catch {} }, [orders]);
+  // load products for everyone
+  useEffect(() => {
+    supabase.from("products").select("*").order("id").then(({ data, error }) => {
+      if (error) setLoadErr(true); else setProducts(data.map(fromDb));
+      setLoaded(true);
+    });
+  }, []);
+
+  // keep cart prices in sync with the database (and drop products that no longer exist)
+  useEffect(() => {
+    if (!loaded) return;
+    setCart((c) => c.flatMap((i) => { const p = products.find((x) => x.id === i.id); return p ? [{ ...p, qty: i.qty }] : []; }));
+  }, [loaded]);
+
+  // admin session tracking
+  const refreshAuth = async () => {
+    const { data } = await supabase.auth.getSession();
+    const s = data.session;
+    setSession(s);
+    if (!s) setAal(null);
+    else {
+      const { data: a } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      setAal(a?.currentLevel ?? null);
+    }
+    setAuthReady(true);
+  };
+  useEffect(() => {
+    refreshAuth();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => { setTimeout(refreshAuth, 0); });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  const authed = !!session && (!REQUIRE_MFA || aal === "aal2");
+
+  // orders are only fetched once the admin is fully signed in (the database enforces this too)
+  useEffect(() => {
+    if (!authed) { setOrders([]); return; }
+    supabase.from("orders").select("*").order("created_at", { ascending: false }).then(({ data }) => data && setOrders(data.map(fromOrder)));
+  }, [authed]);
+
+  useEffect(() => { try { localStorage.setItem("pc_cart", JSON.stringify(cart)); } catch {} }, [cart]);
+  useEffect(() => { try { localStorage.setItem("pc_wish", JSON.stringify(wish)); } catch {} }, [wish]);
   useEffect(() => { window.scrollTo(0, 0); setMenu(false); }, [pathname]);
   useEffect(() => { document.body.style.overflow = menu ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menu]);
   useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
@@ -507,38 +692,46 @@ function PawClubApp() {
   const count = cart.reduce((s, i) => s + i.qty, 0);
   const total = subtotal + delivery;
 
-  const add = (p, n = 1) => { setCart((c) => c.find((i) => i.id === p.id) ? c.map((i) => (i.id === p.id ? { ...i, qty: i.qty + n } : i)) : [...c, { ...p, qty: n }]); notify(`${p.name} added to cart`); };
-  const setQ = (id, q) => setCart((c) => (q < 1 ? c.filter((i) => i.id !== id) : c.map((i) => (i.id === id ? { ...i, qty: q } : i))));
+  const add = (p, n = 1) => { setCart((c) => c.find((i) => i.id === p.id) ? c.map((i) => (i.id === p.id ? { ...i, qty: Math.min(20, i.qty + n) } : i)) : [...c, { ...p, qty: n }]); notify(`${p.name} added to cart`); };
+  const setQ = (id, q) => setCart((c) => (q < 1 ? c.filter((i) => i.id !== id) : c.map((i) => (i.id === id ? { ...i, qty: Math.min(20, q) } : i))));
   const toggle = (id) => setWish((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]));
   const go = (path) => { nav(path); setMenu(false); };
   const view = (p) => nav(`/product/${p.id}`);
 
-  const place = () => {
-    const method = PAYMENT_METHODS.find((m) => m.id === pm);
-    const o = { orderId: orderId(), items: cart.map(({ id, name, image, price, qty, category }) => ({ id, name, image, price, qty, category })), customer: { ...form }, payment: { method: method.name, txId }, subtotal, delivery, total, status: "Pending", placedAt: Date.now() };
-    setOrders((prev) => [...prev, o]); setCart([]); setPm(""); setTxId("");
-    nav(`/order/${o.orderId}`, { replace: true });
+  // The server recalculates every price. We only send product ids and quantities.
+  const place = async () => {
+    if (placing) return;
+    setPlacing(true);
+    const { data, error } = await supabase.functions.invoke("hyper-worker", {
+      body: {
+        items: cart.map(({ id, qty }) => ({ id, qty })),
+        customer: { name: form.name, phone: form.phone, address: form.address, city: form.city },
+        payment: { method: pm, txId },
+        turnstileToken: token,
+      },
+    });
+    setPlacing(false);
+    setToken(""); setTsKey((k) => k + 1); // bot-check tokens work only once
+    if (error || !data?.id) {
+      let msg = "Could not place the order. Please try again.";
+      try { const j = await error?.context?.json?.(); if (j?.error) msg = j.error; } catch {}
+      return notify(msg, "#C0392B");
+    }
+    setCart([]); setPm(""); setTxId("");
+    nav(`/order/${data.id}`, { replace: true });
   };
-
-  const tryLogin = () => { if (pw === ADMIN_PASSWORD) { setAuthed(true); setPw(""); setPwErr(false); } else { setPwErr(true); setPw(""); } };
 
   // ---------- Admin pages: /admin, /admin/products, /admin/orders ----------
   if (pathname.startsWith("/admin")) {
-    if (!authed)
-      return (
-        <div className="login"><div className="login-card">
-          <div style={{ fontSize: 40 }}>🐾</div><h2>Admin sign in</h2>
-          {pwErr && <p style={{ color: "#C0392B", marginBottom: 10 }}>Wrong password. Try again.</p>}
-          <input className="inp" type="password" placeholder="Password" value={pw} autoFocus onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && tryLogin()} />
-          <button className="btn block" onClick={tryLogin}>Sign in</button>
-          <button className="nav-btn" style={{ marginTop: 10 }} onClick={() => nav("/")}>Back to shop</button>
-        </div></div>
-      );
+    if (!authReady) return <div className="login"><div className="login-card"><h2>Loading…</h2></div></div>;
+    if (!authed) return <AdminGate onDone={refreshAuth} onBack={() => nav("/")} />;
     if (pathname.replace(/\/+$/, "") === "/admin") return <Navigate to="/admin/products" replace />;
-    return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} onLogout={() => { setAuthed(false); nav("/"); }} />;
+    return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} onLogout={async () => { await supabase.auth.signOut(); nav("/"); }} />;
   }
 
   const grid = (list) => <div className="grid">{list.map((p) => <Card key={p.id} p={p} onView={() => view(p)} onAdd={() => add(p)} wish={wish} toggle={toggle} />)}</div>;
+  const loadingBox = <div className="empty"><div>🐾</div><b>Loading products…</b></div>;
+  const errorBox = <div className="empty"><div>😿</div><b>Couldn't load products</b>Please check your connection and refresh the page.</div>;
 
   // ---------- Home: / ----------
   const homeEl = (
@@ -551,13 +744,13 @@ function PawClubApp() {
           <div className="hero-btns"><button className="btn" onClick={() => go("/shop")}>Shop for your cat</button><button className="btn ghost" onClick={() => go(shopLink("Toys"))}>Browse toys</button></div>
         </div></div>
       </section>
-      <div className="strip"><div className="strip-in">{[0,1,2,3].map((k) => <span key={k}>🐾 Purr-fect picks 🐟 Treats 🧶 Toys 🛏️ Naps 💖 Cat approved</span>)}</div></div>
+      <div className="strip"><div className="strip-in">{[0, 1, 2, 3].map((k) => <span key={k}>🐾 Purr-fect picks 🐟 Treats 🧶 Toys 🛏️ Naps 💖 Cat approved</span>)}</div></div>
       <div className="perks"><div className="perks-in">
         {[["🚚", "Fast delivery", "Dhaka ৳80 · Outside ৳150"], ["✅", "Vet-approved picks", "Safe for everyday use"], ["💳", "Easy payment", "bKash, Nagad, COD"], ["💬", "Cat-parent support", "We reply within hours"]].map(([i, t, s]) => <div key={t} className="perk"><span>{i}</span><div>{t}<small>{s}</small></div></div>)}
       </div></div>
       <div className="sec">
         <h2>Cat favourites 💖</h2><p className="sub">What other cat parents keep re-ordering</p>
-        {grid(products.filter((p) => p.badge).slice(0, 8))}
+        {loadErr ? errorBox : !loaded ? loadingBox : grid(products.filter((p) => p.badge).slice(0, 8))}
         <div style={{ textAlign: "center", marginTop: 32 }}><button className="btn" onClick={() => go("/shop")}>See all products</button></div>
       </div>
       <div className="band"><div className="sec">
@@ -570,11 +763,11 @@ function PawClubApp() {
   // ---------- Shop: /shop and /shop?category=Toys ----------
   const shopEl = (
     <div className="sec">
-      <h2>All cat supplies</h2><p className="sub">{shown.length} products</p>
+      <h2>All cat supplies</h2><p className="sub">{loaded ? `${shown.length} products` : "Loading…"}</p>
       <input className="inp" style={{ maxWidth: 380 }} placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="tabs">{["All", ...cats].map((c) => <button key={c} className={`tab ${category === c ? "on" : ""}`} onClick={() => nav(shopLink(c))}>{c}</button>)}</div>
-      {grid(shown)}
-      {shown.length === 0 && <div className="empty"><div>😿</div><b>No products found</b>Try another search or category.<br /><button className="btn" onClick={() => { setSearch(""); nav("/shop"); }}>Clear filters</button></div>}
+      {loadErr ? errorBox : !loaded ? loadingBox : grid(shown)}
+      {loaded && !loadErr && shown.length === 0 && <div className="empty"><div>😿</div><b>No products found</b>Try another search or category.<br /><button className="btn" onClick={() => { setSearch(""); nav("/shop"); }}>Clear filters</button></div>}
     </div>
   );
 
@@ -588,9 +781,11 @@ function PawClubApp() {
 
   // ---------- Checkout: /cart, /checkout/delivery, /checkout/payment, /checkout/review ----------
   const step = { "/cart": 1, "/checkout/delivery": 2, "/checkout/payment": 3, "/checkout/review": 4 }[pathname.replace(/\/+$/, "")] || 1;
-  const formOk = form.name && form.phone && form.address && form.city;
+  const phoneOk = PHONE_RE.test(form.phone);
+  const formOk = form.name.trim().length >= 2 && phoneOk && form.address.trim().length >= 5 && CITIES.includes(form.city);
   const pmObj = PAYMENT_METHODS.find((m) => m.id === pm);
-  const payOk = pmObj && (!pmObj.needsTx || txId);
+  const txOk = !pmObj?.needsTx || /^[A-Za-z0-9]{6,30}$/.test(txId);
+  const payOk = !!pmObj && txOk;
   const checkoutEl =
     cart.length === 0 ? (
       <div className="cart"><div className="empty"><div>🛒</div><b>Your cart is empty</b>Add something your cat will love.<br /><button className="btn" onClick={() => go("/shop")}>Start shopping</button></div></div>
@@ -618,12 +813,18 @@ function PawClubApp() {
         </>)}
 
         {step === 2 && (<>
-          {[["name", "Full name", ""], ["phone", "Phone number", "01XXXXXXXXX"], ["address", "Full address", "House, road, area"], ["city", "City", "e.g. Dhaka"]].map(([k, l, ph]) => (
-            <div key={k}><label className="l">{l} *</label><input className="inp" placeholder={ph} value={form[k]} onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} /></div>
-          ))}
+          <div><label className="l">Full name *</label><input className="inp" maxLength={80} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>
+          <div><label className="l">Phone number *</label><input className="inp" inputMode="numeric" maxLength={11} placeholder="01XXXXXXXXX" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "") }))} />
+            {form.phone.length >= 11 && !phoneOk && <p style={{ color: "#C0392B", fontSize: 13, marginTop: -8, marginBottom: 12 }}>Enter a valid 11-digit mobile number starting with 01.</p>}</div>
+          <div><label className="l">Full address *</label><input className="inp" maxLength={200} placeholder="House, road, area" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></div>
+          <div><label className="l">City *</label>
+            <select className="inp" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}>
+              <option value="">Select city</option>
+              {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select></div>
           {form.city && <div className="note">{delivery === 80 ? "Dhaka delivery: ৳80" : "Outside Dhaka delivery: ৳150"}</div>}
           <div className="box"><div className="srow"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div><div className="srow"><span>Delivery</span><span>{form.city ? `৳${delivery}` : "—"}</span></div><div className="stot"><span>Total</span><span>৳{(form.city ? total : subtotal).toLocaleString()}</span></div></div>
-          <div className="row"><button className="btn ghost block" onClick={() => nav("/cart")}>Back</button><button className="btn block" onClick={() => (formOk ? nav("/checkout/payment") : notify("Please fill in all fields", "#C0392B"))}>Continue to payment</button></div>
+          <div className="row"><button className="btn ghost block" onClick={() => nav("/cart")}>Back</button><button className="btn block" onClick={() => (formOk ? nav("/checkout/payment") : notify("Please fill in all fields correctly", "#C0392B"))}>Continue to payment</button></div>
         </>)}
 
         {step === 3 && (<>
@@ -638,12 +839,12 @@ function PawClubApp() {
           {pmObj && pmObj.needsTx && (
             <div className="note">
               {pm === "bank" ? "Transfer the total to the account above, then enter the reference ID." : <>Open the app and choose <b>Send Money</b> to <b>{pmObj.number}</b>, then enter the Transaction ID from the SMS.</>}
-              <input className="inp" style={{ marginTop: 10, marginBottom: 0 }} placeholder="Transaction ID" value={txId} onChange={(e) => setTxId(e.target.value.trim())} />
+              <input className="inp" style={{ marginTop: 10, marginBottom: 0 }} maxLength={30} placeholder="Transaction ID (letters and numbers)" value={txId} onChange={(e) => setTxId(e.target.value.trim())} />
             </div>
           )}
           {pm === "cod" && <div className="note">Pay <b>৳{total.toLocaleString()}</b> in cash when your order arrives.</div>}
           <div className="row"><button className="btn ghost block" onClick={() => nav("/checkout/delivery")}>Back</button>
-            <button className="btn block" onClick={() => { if (!pm) return notify("Choose a payment method", "#C0392B"); if (pmObj.needsTx && !txId) return notify("Enter the Transaction ID", "#C0392B"); nav("/checkout/review"); }}>Review order</button></div>
+            <button className="btn block" onClick={() => { if (!pm) return notify("Choose a payment method", "#C0392B"); if (!txOk) return notify("Enter a valid Transaction ID (6–30 letters or numbers)", "#C0392B"); nav("/checkout/review"); }}>Review order</button></div>
         </>)}
 
         {step === 4 && (<>
@@ -652,7 +853,10 @@ function PawClubApp() {
             <div className="srow"><span>Delivery to {form.city}</span><span>৳{delivery}</span></div><div className="stot"><span>Total</span><span>৳{total.toLocaleString()}</span></div></div>
           <div className="box"><h4>Delivery</h4><b>{form.name}</b> · {form.phone}<br /><span style={{ color: "var(--muted)" }}>{form.address}, {form.city}</span></div>
           <div className="box"><h4>Payment</h4>{pmObj?.name}{txId && ` · ${txId}`}</div>
-          <div className="row"><button className="btn ghost block" onClick={() => nav("/checkout/payment")}>Back</button><button className="btn green block" onClick={place}>Place order</button></div>
+          <div style={{ marginBottom: 16 }}>
+            <Turnstile key={tsKey} siteKey={TURNSTILE_SITEKEY} onSuccess={setToken} onExpire={() => setToken("")} onError={() => setToken("")} />
+          </div>
+          <div className="row"><button className="btn ghost block" onClick={() => nav("/checkout/payment")}>Back</button><button className="btn green block" disabled={!token || placing} onClick={place}>{placing ? "Placing order…" : "Place order"}</button></div>
         </>)}
       </div>
     );
@@ -684,13 +888,13 @@ function PawClubApp() {
       <Routes>
         <Route path="/" element={homeEl} />
         <Route path="/shop" element={shopEl} />
-        <Route path="/product/:id" element={<ProductPage products={products} wish={wish} toggle={toggle} add={add} />} />
+        <Route path="/product/:id" element={<ProductPage products={products} loaded={loaded} wish={wish} toggle={toggle} add={add} />} />
         <Route path="/wishlist" element={wishEl} />
         <Route path="/cart" element={checkoutEl} />
         <Route path="/checkout/delivery" element={checkoutEl} />
         <Route path="/checkout/payment" element={checkoutEl} />
         <Route path="/checkout/review" element={checkoutEl} />
-        <Route path="/order/:orderId" element={<OrderPage orders={orders} />} />
+        <Route path="/order/:orderId" element={<OrderPage />} />
         <Route path="*" element={notFound} />
       </Routes>
 
@@ -709,7 +913,7 @@ function PawClubApp() {
   );
 }
 
-// If you host on GitHub Pages, swap BrowserRouter for HashRouter (see notes).
+// HashRouter works on any static host with no extra setup (Cloudflare Pages, GitHub Pages, Netlify).
 export default function PawClub() {
   return <HashRouter><PawClubApp /></HashRouter>;
 }
