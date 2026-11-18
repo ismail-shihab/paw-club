@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams, useSearchParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { Turnstile } from "@marsidev/react-turnstile";
 import { supabase } from "./supabase";
 import logo from "./assets/logoo.png"; // replace this file when your new logo is ready
@@ -9,6 +9,10 @@ import introVideo from "./assets/intro_video.mp4"; // hero intro video
 // temporarily (and relax is_admin() in SQL, see the notes), then set it back to true.
 const REQUIRE_MFA = true;
 const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITEKEY;
+
+// Secret admin route loaded strictly from VITE_VAULT_PATH (no hardcoded fallback; /admin shows 404)
+const RAW_VAULT = (import.meta.env.VITE_VAULT_PATH || "").trim().replace(/\/+$/, "");
+const VAULT_PATH = RAW_VAULT && RAW_VAULT !== "/" ? (RAW_VAULT.startsWith("/") ? RAW_VAULT : `/${RAW_VAULT}`) : "";
 
 const DEFAULT_CATEGORIES = ["Food", "Toys", "Beds & Trees", "Litter", "Grooming", "Accessories"];
 const CITIES = ["Dhaka", "Chattogram", "Sylhet", "Rajshahi", "Khulna", "Barishal", "Rangpur", "Mymensingh", "Gazipur", "Narayanganj", "Other"];
@@ -31,12 +35,18 @@ const pct = (p) => (p.originalPrice > p.price ? Math.round((1 - p.price / p.orig
 const load = (k, d) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : d; } catch { return d; } };
 
 // ---------- database <-> app shape ----------
-const fromDb = (r) => ({ ...r, originalPrice: r.original_price, imageData: r.image_url });
-const toDb = (p) => ({
-  name: p.name, category: p.category, price: p.price, original_price: p.originalPrice,
-  image: p.image, image_url: p.imageData || null, rating: p.rating, reviews: p.reviews,
-  badge: p.badge || null, description: p.description,
-});
+const fromDb = (r) => {
+  const imgs = Array.isArray(r.images) && r.images.length > 0 ? r.images : r.image_url ? [r.image_url] : [];
+  return { ...r, originalPrice: r.original_price, images: imgs, imageData: imgs[0] || null };
+};
+const toDb = (p) => {
+  const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : p.imageData ? [p.imageData] : [];
+  return {
+    name: p.name, category: p.category, price: p.price, original_price: p.originalPrice,
+    image: p.image, image_url: imgs[0] || null, images: imgs, rating: p.rating, reviews: p.reviews,
+    badge: p.badge || null, description: p.description,
+  };
+};
 const fromOrder = (o) => ({
   ...o,
   orderId: o.code,
@@ -104,6 +114,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .badge{position:absolute;top:12px;left:12px;color:#fff;font-size:11px;font-weight:700;padding:4px 11px;border-radius:999px;border:2px solid var(--ink)}
 .heart{position:absolute;top:10px;right:10px;background:#fff;border:2px solid var(--ink);border-radius:50%;width:36px;height:36px;cursor:pointer;font-size:15px}
 .heart:hover{transform:scale(1.15)}
+.pic-count{position:absolute;bottom:8px;right:10px;background:rgba(74,46,26,.85);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
 .card-body{padding:16px 18px 18px}
 .card-cat{font-size:12px;color:var(--green-l);font-weight:700;margin-bottom:4px}
 .card-name{font-family:var(--display);font-weight:700;font-size:19px;line-height:1.2;margin-bottom:6px}
@@ -126,8 +137,24 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .back{background:none;border:none;color:var(--muted);cursor:pointer;font-weight:700;margin-bottom:24px;font-size:14px}
 .back:hover{color:var(--green)}
 .dgrid{display:grid;grid-template-columns:1fr 1fr;gap:44px}
-.dimg{background:#F6DDB0;border:3px solid var(--ink);box-shadow:8px 8px 0 var(--ink);border-radius:36px;height:340px;display:flex;align-items:center;justify-content:center;font-size:120px;overflow:hidden}
-.dimg img{width:100%;height:100%;object-fit:cover}
+.dimg{position:relative;background:#F6DDB0;border:3px solid var(--ink);box-shadow:8px 8px 0 var(--ink);border-radius:36px;height:360px;display:flex;align-items:center;justify-content:center;font-size:120px;overflow:hidden;user-select:none}
+.dimg.can-zoom{cursor:zoom-in}
+.dimg.zoomed{cursor:zoom-out}
+.dimg img{width:100%;height:100%;object-fit:cover;transition:transform .15s ease-out;pointer-events:none}
+.dimg.zoomed img{transition:none}
+.zoom-pill{position:absolute;bottom:12px;right:12px;background:rgba(255,253,245,.95);color:var(--ink);border:2px solid var(--ink);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:2px 2px 0 var(--ink);z-index:2}
+.zoom-pill:hover{background:var(--butter)}
+.thumbs{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.thumb{width:64px;height:64px;border-radius:16px;border:3px solid var(--ink);overflow:hidden;cursor:pointer;background:#fff;padding:0;opacity:.7;transition:transform .12s,opacity .12s}
+.thumb:hover{opacity:1;transform:translateY(-2px)}
+.thumb.on{opacity:1;box-shadow:3px 3px 0 var(--ink);outline:3px solid var(--green);outline-offset:1px}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.up-list{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.up-item{position:relative;width:74px;height:74px;border-radius:14px;border:2px solid var(--ink);overflow:hidden;background:#fff}
+.up-item img{width:100%;height:100%;object-fit:cover}
+.up-act{position:absolute;inset:auto 0 0 0;background:rgba(74,46,26,.82);display:flex;justify-content:space-around;padding:2px}
+.up-act button{background:none;border:none;color:#fff;font-size:11px;font-weight:700;cursor:pointer;padding:1px 4px}
+.up-act button:disabled{opacity:.35;cursor:default}
 .dname{font-family:var(--display);font-size:36px;font-weight:800;margin:6px 0 10px;line-height:1.1;color:var(--green)}
 .ddesc{color:var(--muted);line-height:1.7;margin:14px 0 20px}
 .qty{display:flex;align-items:center;border:3px solid var(--ink);border-radius:999px;overflow:hidden;background:#fff}
@@ -197,8 +224,7 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .emoji span.on{background:#fff;border-color:var(--ink)}
 
 .burger{display:none;position:relative;z-index:300;background:#fff;border:3px solid var(--ink);box-shadow:2px 2px 0 var(--ink);width:44px;height:44px;border-radius:14px;font-size:20px;cursor:pointer;line-height:1;flex-shrink:0}
-.dsearch,.only-m,.scrim{display:none}
-.admin-btn{opacity:.35}
+.dsearch,.scrim{display:none}
 .item-info{flex:1;min-width:0}
 
 @media(max-width:900px){
@@ -217,8 +243,6 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .nav-btn{text-align:left;font-size:16px;padding:12px 16px;border-color:var(--ink);background:#fff}
 .nav-btn.on{background:var(--butter)}
 .dsearch{display:block;margin:0 0 6px}
-.only-m{display:inline}
-.admin-btn{opacity:1;margin-top:auto}
 .scrim.show{display:block;position:fixed;inset:0;background:rgba(74,46,26,.5);z-index:150}
 .sec{padding:40px 16px}}
 @media(max-width:560px){
@@ -237,7 +261,7 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .price-row{flex-wrap:wrap;gap:2px 6px;margin:6px 0 10px}.price{font-size:18px}.old{font-size:11px}.save{font-size:10px;padding:1px 6px}
 .add{font-size:13px;padding:7px}
 .cats{grid-template-columns:1fr 1fr;gap:12px}.cat{padding:16px 8px;border-radius:20px}.cat div:first-child{font-size:36px}.cat b{font-size:16px}
-.detail{padding:20px 16px}.dgrid{gap:22px}.dimg{height:250px;font-size:90px;box-shadow:5px 5px 0 var(--ink);border-radius:26px}.dname{font-size:28px}
+.detail{padding:20px 16px}.dgrid{gap:22px}.dimg{height:270px;font-size:90px;box-shadow:5px 5px 0 var(--ink);border-radius:26px}.dname{font-size:28px}.thumb{width:54px;height:54px;border-radius:12px}
 .cart{padding:24px 14px}.step{font-size:11px;padding:8px 2px}
 .item{flex-wrap:wrap;gap:10px;padding:12px}.item-info{flex:1 1 calc(100% - 80px)}.item .qty{margin-right:auto}
 .box{padding:16px}.rhead{padding:22px 14px}.rhead h2{font-size:26px}.rbody{padding:18px 14px}.oid{font-size:20px}
@@ -247,16 +271,22 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .adm-h{height:auto;padding:10px 14px;flex-wrap:wrap;gap:8px}.adm-c{padding:20px 14px}.adm-c .row{flex-wrap:wrap}}
 `;
 
-const Img = ({ p }) => (p.imageData ? <img src={p.imageData} alt={p.name} /> : <span>{p.image}</span>);
+const getGallery = (p) => (Array.isArray(p.images) && p.images.length > 0 ? p.images : p.imageData ? [p.imageData] : []);
+const Img = ({ p }) => {
+  const first = getGallery(p)[0];
+  return first ? <img src={first} alt={p.name} /> : <span>{p.image}</span>;
+};
 
 function Card({ p, onView, onAdd, wish, toggle }) {
   const off = pct(p);
+  const pics = getGallery(p);
   return (
     <div className="card" onClick={onView}>
       <div className="card-img">
         <Img p={p} />
         {p.badge && <span className="badge" style={{ background: badgeColors[p.badge] || "#C8642B" }}>{p.badge}</span>}
         <button className="heart" aria-label="Wishlist" onClick={(e) => { e.stopPropagation(); toggle(p.id); }}>{wish.includes(p.id) ? "❤️" : "🤍"}</button>
+        {pics.length > 1 && <span className="pic-count">📷 {pics.length}</span>}
       </div>
       <div className="card-body">
         <div className="card-cat">{p.category}</div>
@@ -285,32 +315,65 @@ const compress = async (file, max = 800) => {
 };
 
 function ProductModal({ product, onSave, onClose, categories }) {
-  const [f, setF] = useState(product ? { ...product } : { name: "", category: categories[0], price: "", originalPrice: "", image: "🐾", rating: 4.5, reviews: 0, badge: "", description: "" });
+  const initImgs = product ? getGallery(product) : [];
+  const [f, setF] = useState(product ? { ...product, images: initImgs } : { name: "", category: categories[0], price: "", originalPrice: "", image: "🐾", images: [], rating: 4.5, reviews: 0, badge: "", description: "" });
   const [newCat, setNewCat] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef();
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
-  const upload = async (file) => {
-    if (!file || !file.type.startsWith("image/")) return;
+
+  const uploadMany = async (fileList) => {
+    const files = Array.from(fileList || []).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
     setBusy(true);
     try {
-      const blob = await compress(file);
-      const path = `${crypto.randomUUID()}.webp`;
-      const { error } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/webp" });
-      if (error) { alert("Upload failed: " + error.message); return; }
-      set("imageData", supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl);
-    } catch (e) {
-      alert("Could not process that image.");
+      const added = [];
+      for (const file of files) {
+        const blob = await compress(file);
+        const path = `${crypto.randomUUID()}.webp`;
+        const { error } = await supabase.storage.from("product-images").upload(path, blob, { contentType: "image/webp" });
+        if (error) { alert("Upload failed: " + error.message); break; }
+        added.push(supabase.storage.from("product-images").getPublicUrl(path).data.publicUrl);
+      }
+      if (added.length) {
+        setF((x) => {
+          const next = [...(x.images || []), ...added];
+          return { ...x, images: next, imageData: next[0] || null };
+        });
+      }
+    } catch {
+      alert("Could not process one of those images.");
     } finally {
       setBusy(false);
     }
   };
+
+  const moveImg = (idx, dir) => {
+    setF((x) => {
+      const next = [...(x.images || [])];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return x;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return { ...x, images: next, imageData: next[0] || null };
+    });
+  };
+
+  const removeImg = (idx) => {
+    setF((x) => {
+      const next = (x.images || []).filter((_, i) => i !== idx);
+      return { ...x, images: next, imageData: next[0] || null };
+    });
+  };
+
   const save = () => {
     const price = Math.round(+f.price), originalPrice = Math.round(+f.originalPrice);
     if (!f.name || !f.category || !(price > 0) || !(originalPrice > 0)) return alert("Please fill name, category and both prices.");
     if (originalPrice < price) return alert("Original price must be the same as or higher than the sale price.");
-    onSave({ ...f, price, originalPrice, rating: +f.rating, reviews: Math.round(+f.reviews) || 0, badge: f.badge || null });
+    const imgs = f.images || [];
+    onSave({ ...f, price, originalPrice, images: imgs, imageData: imgs[0] || null, rating: +f.rating, reviews: Math.round(+f.reviews) || 0, badge: f.badge || null });
   };
+
+  const imgs = f.images || [];
   return (
     <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="mbox">
@@ -333,12 +396,28 @@ function ProductModal({ product, onSave, onClose, categories }) {
           <div><label className="l">Original price (৳) *</label><input className="inp" type="number" min="1" value={f.originalPrice} onChange={(e) => set("originalPrice", e.target.value)} /></div>
           <div className="full"><label className="l">Description</label><textarea className="inp" rows={3} maxLength={1000} value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
           <div className="full">
-            <label className="l">Image</label>
-            <div className="emoji">{EMOJIS.map((em) => <span key={em} className={!f.imageData && f.image === em ? "on" : ""} onClick={() => { set("image", em); set("imageData", null); }}>{em}</span>)}</div>
-            <div className="row" style={{ marginBottom: 14 }}>
-              <button className="sm e" disabled={busy} onClick={() => fileRef.current.click()}>{busy ? "Uploading…" : "📷 Upload photo"}</button>
-              {f.imageData && <><img src={f.imageData} alt="" style={{ height: 44, borderRadius: 8 }} /><button className="sm d" onClick={() => set("imageData", null)}>Remove</button></>}
-              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => { upload(e.target.files[0]); e.target.value = ""; }} />
+            <label className="l">Photos & fallback icon (first photo is main cover)</label>
+            <div className="emoji">{EMOJIS.map((em) => <span key={em} className={!imgs.length && f.image === em ? "on" : ""} onClick={() => set("image", em)}>{em}</span>)}</div>
+            <div style={{ marginBottom: 14 }}>
+              <div className="row">
+                <button type="button" className="sm e" disabled={busy} onClick={() => fileRef.current.click()}>{busy ? "Uploading…" : "📷 Upload photos (select multiple)"}</button>
+                {imgs.length > 0 && <button type="button" className="sm d" onClick={() => setF((x) => ({ ...x, images: [], imageData: null }))}>Clear all ({imgs.length})</button>}
+              </div>
+              {imgs.length > 0 && (
+                <div className="up-list">
+                  {imgs.map((url, idx) => (
+                    <div key={url + idx} className="up-item" title={idx === 0 ? "Main cover photo" : `Photo ${idx + 1}`}>
+                      <img src={url} alt="" />
+                      <div className="up-act">
+                        <button type="button" disabled={idx === 0} onClick={() => moveImg(idx, -1)}>←</button>
+                        <button type="button" onClick={() => removeImg(idx)}>✕</button>
+                        <button type="button" disabled={idx === imgs.length - 1} onClick={() => moveImg(idx, 1)}>→</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={(e) => { uploadMany(e.target.files); e.target.value = ""; }} />
             </div>
           </div>
         </div>
@@ -373,7 +452,7 @@ function OrderModal({ order, onClose, onStatus }) {
 
 function Admin({ products, setProducts, orders, setOrders, onLogout }) {
   const nav = useNavigate();
-  const tab = useLocation().pathname.startsWith("/admin/orders") ? "orders" : "products";
+  const tab = useLocation().pathname.startsWith(`${VAULT_PATH}/orders`) ? "orders" : "products";
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null);
   const [sel, setSel] = useState(null);
@@ -411,8 +490,8 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
       {sel && <OrderModal order={sel} onClose={() => setSel(null)} onStatus={status} />}
       <div className="adm-h">
         <div className="row"><b style={{ fontFamily: "var(--display)", fontSize: 18 }}>Paw Club admin</b>
-          <button className={`nav-btn ${tab === "products" ? "on" : ""}`} onClick={() => { nav("/admin/products"); setQ(""); }}>Products</button>
-          <button className={`nav-btn ${tab === "orders" ? "on" : ""}`} onClick={() => { nav("/admin/orders"); setQ(""); }}>Orders{pending > 0 && ` (${pending})`}</button>
+          <button className={`nav-btn ${tab === "products" ? "on" : ""}`} onClick={() => { nav(`${VAULT_PATH}/products`); setQ(""); }}>Products</button>
+          <button className={`nav-btn ${tab === "orders" ? "on" : ""}`} onClick={() => { nav(`${VAULT_PATH}/orders`); setQ(""); }}>Orders{pending > 0 && ` (${pending})`}</button>
         </div>
         <button className="nav-btn" onClick={onLogout}>Sign out</button>
       </div>
@@ -434,7 +513,7 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
               <tbody>
                 {fp.map((p) => (
                   <tr key={p.id}>
-                    <td><b>{p.image} {p.name}</b></td><td>{p.category}</td>
+                    <td><b>{p.image} {p.name}</b>{getGallery(p).length > 1 && <small style={{ color: "var(--muted)", marginLeft: 6 }}>({getGallery(p).length} photos)</small>}</td><td>{p.category}</td>
                     <td>৳{p.price.toLocaleString()} <s style={{ color: "var(--faint)" }}>৳{p.originalPrice.toLocaleString()}</s></td>
                     <td>{p.badge || "—"}</td>
                     <td><button className="sm e" onClick={() => setModal(p)}>Edit</button><button className="sm d" onClick={() => removeProduct(p.id)}>Delete</button></td>
@@ -466,8 +545,7 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
   );
 }
 
-// Admin sign in: email + password, then a 6-digit code from your authenticator app.
-// The first time, it shows a QR code so you can link your authenticator app.
+// Admin sign in: Cloudflare Turnstile + email + password, then a 6-digit code from your authenticator app.
 function AdminGate({ onDone, onBack }) {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
@@ -478,13 +556,14 @@ function AdminGate({ onDone, onBack }) {
   const [secret, setSecret] = useState("");
   const [fid, setFid] = useState("");
   const [busy, setBusy] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [tsKey, setTsKey] = useState(0);
 
   const startMfa = async () => {
     const { data: f, error } = await supabase.auth.mfa.listFactors();
     if (error) return setMsg(error.message);
     const verified = f?.totp?.[0];
     if (verified) { setFid(verified.id); setStage("verify"); return; }
-    // remove half-finished enrollments from earlier attempts
     for (const x of f?.all ?? []) {
       if (x.factor_type === "totp" && x.status === "unverified") await supabase.auth.mfa.unenroll({ factorId: x.id });
     }
@@ -496,17 +575,22 @@ function AdminGate({ onDone, onBack }) {
     setStage("enroll");
   };
 
-  // If you are already signed in with a password but have not entered the code yet, continue from there.
   useEffect(() => {
     if (!REQUIRE_MFA) return;
     supabase.auth.getSession().then(({ data }) => { if (data.session) startMfa(); });
   }, []);
 
   const login = async () => {
+    if (!captchaToken) return setMsg("Complete the security check first.");
     setBusy(true); setMsg("");
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password: pw,
+      options: { captchaToken },
+    });
     setBusy(false); setPw("");
-    if (error) return setMsg("Wrong email or password.");
+    setCaptchaToken(""); setTsKey((k) => k + 1);
+    if (error) return setMsg("Access denied.");
     if (!REQUIRE_MFA) return onDone();
     await startMfa();
   };
@@ -521,12 +605,15 @@ function AdminGate({ onDone, onBack }) {
 
   return (
     <div className="login"><div className="login-card">
-      <div style={{ fontSize: 40 }}>🐾</div><h2>Admin sign in</h2>
+      <div style={{ fontSize: 40 }}>🐾</div><h2>Restricted sign in</h2>
       {msg && <p style={{ color: "#C0392B", marginBottom: 10 }}>{msg}</p>}
       {stage === "login" && <>
         <input className="inp" type="email" placeholder="Email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="inp" type="password" placeholder="Password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && login()} />
-        <button className="btn block" disabled={busy} onClick={login}>{busy ? "Signing in…" : "Continue"}</button>
+        <div style={{ marginBottom: 14 }}>
+          <Turnstile key={tsKey} siteKey={TURNSTILE_SITEKEY} onSuccess={setCaptchaToken} onExpire={() => setCaptchaToken("")} onError={() => setCaptchaToken("")} />
+        </div>
+        <button className="btn block" disabled={busy || !captchaToken} onClick={login}>{busy ? "Checking…" : "Continue"}</button>
       </>}
       {stage === "enroll" && <>
         <p style={{ marginBottom: 10, lineHeight: 1.6 }}>One-time setup: scan this QR code with your authenticator app, then enter the 6-digit code it shows.</p>
@@ -550,17 +637,95 @@ function ProductPage({ products, loaded, wish, toggle, add }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [qty, setQty] = useState(1);
-  useEffect(() => setQty(1), [id]);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
+  const [origin, setOrigin] = useState({ x: 50, y: 50 });
+
+  useEffect(() => { setQty(1); setActiveIdx(0); setZoomed(false); setOrigin({ x: 50, y: 50 }); }, [id]);
+
   const selected = products.find((p) => String(p.id) === id);
   if (!loaded) return <div className="sec"><div className="empty"><div>🐾</div><b>Loading…</b></div></div>;
   if (!selected)
     return <div className="sec"><div className="empty"><div>😿</div><b>Product not found</b>It may have been removed.<br /><button className="btn" onClick={() => nav("/shop")}>Browse products</button></div></div>;
+
   const off = pct(selected);
+  const gallery = getGallery(selected);
+  const activeImg = gallery[activeIdx] || null;
+
+  const updatePan = (clientX, clientY, rect) => {
+    const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
+    setOrigin({ x, y });
+  };
+
+  const handleMove = (e) => {
+    if (!zoomed || !activeImg) return;
+    updatePan(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
+  };
+
+  const handleTouch = (e) => {
+    if (!zoomed || !activeImg || !e.touches[0]) return;
+    updatePan(e.touches[0].clientX, e.touches[0].clientY, e.currentTarget.getBoundingClientRect());
+  };
+
+  const toggleZoom = (e) => {
+    if (!activeImg) return;
+    if (!zoomed && e.clientX) {
+      updatePan(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
+    }
+    setZoomed((z) => !z);
+  };
+
   return (
     <div className="detail">
       <button className="back" onClick={() => nav("/shop")}>← Back to products</button>
       <div className="dgrid">
-        <div className="dimg"><Img p={selected} /></div>
+        <div>
+          <div
+            className={`dimg ${activeImg ? (zoomed ? "zoomed" : "can-zoom") : ""}`}
+            onClick={toggleZoom}
+            onMouseMove={handleMove}
+            onMouseLeave={() => setZoomed(false)}
+            onTouchMove={handleTouch}
+          >
+            {activeImg ? (
+              <>
+                <img
+                  src={activeImg}
+                  alt={selected.name}
+                  style={{
+                    transformOrigin: `${origin.x}% ${origin.y}%`,
+                    transform: zoomed ? "scale(2.2)" : "scale(1)",
+                  }}
+                />
+                <button
+                  type="button"
+                  className="zoom-pill"
+                  onClick={(e) => { e.stopPropagation(); setOrigin({ x: 50, y: 50 }); setZoomed((z) => !z); }}
+                >
+                  {zoomed ? "🔍 Zoom out" : "🔍 Zoom in"}
+                </button>
+              </>
+            ) : (
+              <span>{selected.image}</span>
+            )}
+          </div>
+          {gallery.length > 1 && (
+            <div className="thumbs">
+              {gallery.map((url, idx) => (
+                <button
+                  key={url + idx}
+                  type="button"
+                  className={`thumb ${idx === activeIdx ? "on" : ""}`}
+                  aria-label={`View photo ${idx + 1}`}
+                  onClick={() => { setActiveIdx(idx); setZoomed(false); }}
+                >
+                  <img src={url} alt="" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div>
           <div className="card-cat">{selected.category}</div>
           <h2 className="dname">{selected.name}</h2>
@@ -721,11 +886,11 @@ function PawClubApp() {
     nav(`/order/${data.id}`, { replace: true });
   };
 
-  // ---------- Admin pages: /admin, /admin/products, /admin/orders ----------
-  if (pathname.startsWith("/admin")) {
+  // ---------- Secret Vault pages (loaded from VITE_VAULT_PATH; not linked anywhere in UI) ----------
+  if (VAULT_PATH && (pathname === VAULT_PATH || pathname.startsWith(`${VAULT_PATH}/`))) {
     if (!authReady) return <div className="login"><div className="login-card"><h2>Loading…</h2></div></div>;
     if (!authed) return <AdminGate onDone={refreshAuth} onBack={() => nav("/")} />;
-    if (pathname.replace(/\/+$/, "") === "/admin") return <Navigate to="/admin/products" replace />;
+    if (pathname.replace(/\/+$/, "") === VAULT_PATH) return <Navigate to={`${VAULT_PATH}/products`} replace />;
     return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} onLogout={async () => { await supabase.auth.signOut(); nav("/"); }} />;
   }
 
@@ -878,7 +1043,6 @@ function PawClubApp() {
             <button className={`nav-btn ${on(pathname === "/")}`} onClick={() => go("/")}>Home</button>
             <button className={`nav-btn ${on(pathname.startsWith("/shop") || pathname.startsWith("/product"))}`} onClick={() => go("/shop")}>Shop</button>
             <button className={`nav-btn ${on(pathname === "/wishlist")}`} onClick={() => go("/wishlist")}>Wishlist{wish.length ? ` (${wish.length})` : ""}</button>
-            <button className="nav-btn admin-btn" aria-label="Admin" onClick={() => go("/admin")}>🔧<span className="only-m"> Admin</span></button>
           </nav>
           <button className="cart-btn" onClick={() => go("/cart")}>🛒 Cart{count ? ` (${count})` : ""}</button>
           <button className="burger" aria-label={menu ? "Close menu" : "Open menu"} aria-expanded={menu} onClick={() => setMenu((m) => !m)}>{menu ? "✕" : "☰"}</button>
@@ -913,7 +1077,7 @@ function PawClubApp() {
   );
 }
 
-// HashRouter works on any static host with no extra setup (Cloudflare Pages, GitHub Pages, Netlify).
+// BrowserRouter works on any static host with no extra setup (Cloudflare Pages, GitHub Pages, Netlify).
 export default function PawClub() {
-  return <HashRouter><PawClubApp /></HashRouter>;
+  return <BrowserRouter><PawClubApp /></BrowserRouter>;
 }
