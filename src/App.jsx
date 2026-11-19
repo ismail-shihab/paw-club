@@ -18,19 +18,20 @@ const ORDER_FUNCTION = "hyper-worker";
 const RAW_VAULT = (import.meta.env.VITE_VAULT_PATH || "").trim().replace(/\/+$/, "");
 const VAULT_PATH = RAW_VAULT && RAW_VAULT !== "/" ? (RAW_VAULT.startsWith("/") ? RAW_VAULT : `/${RAW_VAULT}`) : "";
 
+const SHOP_PHONE = "01613336011";
+const BKASH_NUMBER = "01622783078";
+const NAGAD_NUMBER = "01622783078";
+
 const DEFAULT_CATEGORIES = ["Food", "Toys", "Beds & Trees", "Litter", "Grooming", "Accessories"];
 const CITIES = ["Dhaka", "Chattogram", "Sylhet", "Rajshahi", "Khulna", "Barishal", "Rangpur", "Mymensingh", "Gazipur", "Narayanganj", "Other"];
 const PHONE_RE = /^01[3-9]\d{8}$/;
 const BADGES = ["", "Best Seller", "New", "Cat Favorite", "Hot Deal"];
-const EMOJIS = ["🐟", "🍗", "🧶", "🐭", "🛏️", "🏠", "🪣", "🧼", "🧴", "🪮", "🎀", "🔔", "🥣", "🧳", "🐾", "🐱", "🦴", "🎣"];
 const badgeColors = { "Best Seller": "#1E5B3A", New: "#D99A1E", "Cat Favorite": "#D9677A", "Hot Deal": "#C8642B" };
-const catIcons = { Food: "🍗", Toys: "🧶", "Beds & Trees": "🛏️", Litter: "🪣", Grooming: "🪮", Accessories: "🎀" };
 
 const PAYMENT_METHODS = [
-  { id: "bkash", name: "bKash", color: "#E2136E", icon: "📱", number: "01XXXXXXXXX", needsTx: true },
-  { id: "nagad", name: "Nagad", color: "#F6821F", icon: "💳", number: "01XXXXXXXXX", needsTx: true },
-  { id: "bank", name: "Bank Transfer", color: "#1A5276", icon: "🏦", number: "Bank name · A/C: XXXX-XXXXXXXX", needsTx: true },
-  { id: "cod", name: "Cash on Delivery", color: "#1E5B3A", icon: "💵", number: "Pay when delivered", needsTx: false },
+  { id: "bkash", name: "bKash", color: "#E2136E", logoUrl: "/logos/bkash.png", number: BKASH_NUMBER, needsTx: true },
+  { id: "nagad", name: "Nagad", color: "#F6821F", logoUrl: "/logos/nagad.png", number: NAGAD_NUMBER, needsTx: true },
+  { id: "cod", name: "Cash on Delivery", color: "#1E5B3A", logoUrl: null, number: "Pay when delivered", needsTx: false },
 ];
 
 const getDelivery = (city) => (!city ? 80 : city.trim().toLowerCase() === "dhaka" ? 80 : 150);
@@ -38,16 +39,31 @@ const stars = (r) => "★".repeat(Math.round(r)) + "☆".repeat(5 - Math.round(r
 const pct = (p) => (p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : 0);
 const load = (k, d) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : d; } catch { return d; } };
 
+const calcDiscount = (coupon, subtotal) => {
+  if (!coupon || !coupon.active || subtotal < Number(coupon.min_order || 0)) return 0;
+  const val = Number(coupon.discount_value) || 0;
+  if (coupon.discount_type === "percent") return Math.min(subtotal, Math.round((subtotal * val) / 100));
+  return Math.min(subtotal, Math.round(val));
+};
+
 // ---------- database <-> app shape ----------
 const fromDb = (r) => {
   const imgs = Array.isArray(r.images) && r.images.length > 0 ? r.images : r.image_url ? [r.image_url] : [];
-  return { ...r, originalPrice: r.original_price, images: imgs, imageData: imgs[0] || null };
+  return {
+    ...r,
+    originalPrice: r.original_price,
+    rating: Number(r.rating) || 0,
+    reviews: Number(r.reviews) || 0,
+    images: imgs,
+    imageData: imgs[0] || null,
+  };
 };
 const toDb = (p) => {
   const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : p.imageData ? [p.imageData] : [];
   return {
     name: p.name, category: p.category, price: p.price, original_price: p.originalPrice,
-    image: p.image, image_url: imgs[0] || null, images: imgs, rating: p.rating, reviews: p.reviews,
+    image: p.image, image_url: imgs[0] || null, images: imgs,
+    rating: Number(p.rating) || 0, reviews: Number(p.reviews) || 0,
     badge: p.badge || null, description: p.description,
   };
 };
@@ -75,7 +91,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .search{flex:1;max-width:360px;margin:0 auto;background:#fff;border:3px solid var(--ink);border-radius:999px;padding:9px 18px;color:var(--ink);font-size:14px}
 .search::placeholder{color:var(--faint)}
 .nav{display:flex;gap:6px;align-items:center;margin-left:auto}
-.nav-btn{background:none;border:3px solid transparent;color:var(--ink);padding:6px 14px;border-radius:999px;cursor:pointer;font-weight:700;font-size:14px}
+.nav-btn{background:none;border:3px solid transparent;color:var(--ink);padding:6px 14px;border-radius:999px;cursor:pointer;font-weight:700;font-size:14px;display:inline-flex;align-items:center;gap:6px}
 .nav-btn:hover{background:var(--lilac)}.nav-btn.on{background:var(--butter);border-color:var(--ink)}
 .cart-btn{background:var(--green);color:#FFF6D8;border:3px solid var(--ink);box-shadow:3px 3px 0 var(--ink);padding:7px 18px;border-radius:999px;font-weight:700;cursor:pointer;font-size:14px}
 .cart-btn:hover{background:var(--green-l)}
@@ -166,6 +182,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .qty span{width:38px;text-align:center;font-weight:700}
 .row{display:flex;gap:12px;align-items:center}
 
+.rev-sec{margin-top:44px;padding-top:32px;border-top:3px dashed var(--ink)}
+.rev-sec h3{font-family:var(--display);font-size:26px;color:var(--green);margin-bottom:14px}
+.rev-grid{display:grid;grid-template-columns:1.15fr 1fr;gap:24px;align-items:start}
+.rev-card{background:#fff;border:3px solid var(--ink);border-radius:22px;padding:16px 18px;margin-bottom:12px;box-shadow:3px 3px 0 var(--ink)}
+.rev-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.rev-badge{background:#DDEFE2;color:#17603C;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;border:1.5px solid #17603C}
+.star-pick{display:flex;gap:6px;margin-bottom:12px}
+.star-btn{background:#fff;border:2px solid var(--ink);border-radius:12px;padding:6px 12px;font-size:16px;cursor:pointer;color:#B5A58E}
+.star-btn.on{background:var(--butter);color:#D98A00;box-shadow:2px 2px 0 var(--ink)}
+
 .cart{max-width:800px;margin:0 auto;padding:40px 28px}
 .steps{display:flex;border:3px solid var(--ink);border-radius:999px;overflow:hidden;margin:20px 0 28px;background:#fff}
 .step{flex:1;text-align:center;padding:10px 6px;font-size:13px;font-weight:700;color:var(--muted)}
@@ -200,7 +226,7 @@ label.l{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
 .foot{background:var(--green);color:#E6EBD9;padding:52px 28px 24px;margin-top:70px;border-top:3px solid var(--ink)}
 .foot-grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:2fr 1.5fr 1fr 1fr;gap:36px;padding-bottom:32px;border-bottom:2px dashed rgba(255,255,255,.25)}
 .foot h5{color:var(--butter);font-family:var(--display);font-size:19px;margin-bottom:12px}
-.foot a,.foot p{display:block;font-size:14px;line-height:1.9;cursor:pointer}
+.foot a,.foot p{display:block;font-size:14px;line-height:1.9;cursor:pointer;color:inherit;text-decoration:none}
 .foot a:hover{color:var(--butter)}
 .foot-b{max-width:1200px;margin:20px auto 0;font-size:13px}
 
@@ -232,7 +258,7 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .item-info{flex:1;min-width:0}
 
 @media(max-width:900px){
-.dgrid{grid-template-columns:1fr}.hero h1{font-size:40px}
+.dgrid,.rev-grid{grid-template-columns:1fr}.hero h1{font-size:40px}
 .hero{min-height:0;align-items:flex-start;padding:36px 16px calc(56.25vw + 20px)}
 .hero-video{top:auto;bottom:0;left:0;right:auto;width:100%;height:auto;aspect-ratio:16/9;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 18%);mask-image:linear-gradient(to bottom,transparent,#000 18%)}
 .hero-text{max-width:100%}
@@ -275,10 +301,98 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .adm-h{height:auto;padding:10px 14px;flex-wrap:wrap;gap:8px}.adm-c{padding:20px 14px}.adm-c .row{flex-wrap:wrap}}
 `;
 
+const EXTRA_CSS = `
+.perk-ico{width:42px;height:42px;border-radius:50%;border:3px solid var(--ink);background:var(--butter);color:var(--green);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.perk-ico svg{width:20px;height:20px}
+.pay-logo{width:52px;height:38px;border-radius:12px;border:2px solid var(--ink);background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;flex-shrink:0;padding:3px}
+.pay-logo img{width:100%;height:100%;object-fit:contain;display:block}
+.pay-logo svg{width:100%;height:100%;display:block}
+.foot-pay{display:flex!important;align-items:center;gap:10px;margin-bottom:6px}
+.foot-pay .pay-logo{width:38px;height:26px;border-radius:8px;padding:2px}
+.foot-line{display:flex!important;align-items:center;gap:8px}
+.heart{display:flex;align-items:center;justify-content:center;padding:0;color:var(--ink)}
+.heart svg{width:18px;height:18px;display:block}
+.link-ico{display:inline-block;vertical-align:-3px;margin-right:6px}
+`;
+
+const HomeIcon = ({ size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 10.5L12 3l9 7.5" />
+    <path d="M5 9.5V20h14V9.5" />
+    <path d="M9.5 20v-6h5v6" />
+  </svg>
+);
+
+const PhoneIcon = ({ size = 15 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7A2 2 0 0 1 22 16.9z" />
+  </svg>
+);
+
+// Renders official /logos/bkash.png or /logos/nagad.png when placed in public/logos/,
+// with crisp brand vector emblems as automatic fallback so it never breaks.
+function PaymentLogo({ method }) {
+  const [imgErr, setImgErr] = useState(false);
+
+  if (method.logoUrl && !imgErr) {
+    return (
+      <span className="pay-logo">
+        <img src={method.logoUrl} alt={`${method.name} logo`} onError={() => setImgErr(true)} />
+      </span>
+    );
+  }
+
+  if (method.id === "bkash") {
+    return (
+      <span className="pay-logo" style={{ background: "#E2136E", borderColor: "#4A2E1A" }}>
+        <svg viewBox="0 0 64 40" aria-label="bKash">
+          <path d="M22 6L36 16L29 22Z" fill="#fff" />
+          <path d="M36 16L45 11L39 23Z" fill="#FFD1E6" />
+          <path d="M29 22L39 23L31 32Z" fill="#fff" opacity=".9" />
+          <path d="M22 6L29 22L19 20Z" fill="#FFB3D6" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (method.id === "nagad") {
+    return (
+      <span className="pay-logo" style={{ background: "#F6821F", borderColor: "#4A2E1A" }}>
+        <svg viewBox="0 0 64 40" aria-label="Nagad">
+          <circle cx="32" cy="20" r="13" fill="#fff" />
+          <path d="M26 26V14l12 12V14" fill="none" stroke="#E2136E" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    );
+  }
+
+  return (
+    <span className="pay-logo" style={{ background: "#1E5B3A", color: "#FFF6D8", fontFamily: "var(--display)", fontSize: 18, fontWeight: 800 }}>
+      ৳
+    </span>
+  );
+}
+
+const Heart = ({ filled, size = 18, className }) => (
+  <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill={filled ? "#D9677A" : "none"} stroke={filled ? "#D9677A" : "currentColor"} strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 21s-8-5-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 6-8 11-8 11z" />
+  </svg>
+);
+
+const PerkIcon = ({ name }) => {
+  const shapes = {
+    truck: <><path d="M3 7h11v9H3z" /><path d="M14 10h4l3 3v3h-7z" /><circle cx="7" cy="18" r="1.8" /><circle cx="17" cy="18" r="1.8" /></>,
+    shield: <><path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z" /><path d="M9 12l2 2 4-4" /></>,
+    card: <><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M3 10h18" /></>,
+    chat: <path d="M4 5h16v11H9l-5 4z" />,
+  };
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{shapes[name]}</svg>;
+};
+
 const getGallery = (p) => (Array.isArray(p.images) && p.images.length > 0 ? p.images : p.imageData ? [p.imageData] : []);
 const Img = ({ p }) => {
   const first = getGallery(p)[0];
-  return first ? <img src={first} alt={p.name} /> : <span>{p.image}</span>;
+  return first ? <img src={first} alt={p.name} /> : <span>🐾</span>;
 };
 
 function Card({ p, onView, onAdd, wish, toggle }) {
@@ -289,13 +403,13 @@ function Card({ p, onView, onAdd, wish, toggle }) {
       <div className="card-img">
         <Img p={p} />
         {p.badge && <span className="badge" style={{ background: badgeColors[p.badge] || "#C8642B" }}>{p.badge}</span>}
-        <button className="heart" aria-label="Wishlist" onClick={(e) => { e.stopPropagation(); toggle(p.id); }}>{wish.includes(p.id) ? "❤️" : "🤍"}</button>
-        {pics.length > 1 && <span className="pic-count">📷 {pics.length}</span>}
+        <button className="heart" aria-label="Wishlist" onClick={(e) => { e.stopPropagation(); toggle(p.id); }}><Heart filled={wish.includes(p.id)} /></button>
+        {pics.length > 1 && <span className="pic-count">{pics.length} photos</span>}
       </div>
       <div className="card-body">
         <div className="card-cat">{p.category}</div>
         <div className="card-name">{p.name}</div>
-        <div className="rate">{stars(p.rating)}<span>({p.reviews})</span></div>
+        {p.reviews > 0 && <div className="rate">{stars(p.rating)}<span>{p.rating.toFixed(1)} ({p.reviews})</span></div>}
         <div className="price-row">
           <span className="price">৳{p.price.toLocaleString()}</span>
           {off > 0 && <span className="old">৳{p.originalPrice.toLocaleString()}</span>}
@@ -320,7 +434,7 @@ const compress = async (file, max = 800) => {
 
 function ProductModal({ product, onSave, onClose, categories }) {
   const initImgs = product ? getGallery(product) : [];
-  const [f, setF] = useState(product ? { ...product, images: initImgs } : { name: "", category: categories[0], price: "", originalPrice: "", image: "🐾", images: [], rating: 4.5, reviews: 0, badge: "", description: "" });
+  const [f, setF] = useState(product ? { ...product, images: initImgs } : { name: "", category: categories[0], price: "", originalPrice: "", image: "🐾", images: [], rating: 0, reviews: 0, badge: "", description: "" });
   const [newCat, setNewCat] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef();
@@ -374,7 +488,16 @@ function ProductModal({ product, onSave, onClose, categories }) {
     if (!f.name || !f.category || !(price > 0) || !(originalPrice > 0)) return alert("Please fill name, category and both prices.");
     if (originalPrice < price) return alert("Original price must be the same as or higher than the sale price.");
     const imgs = f.images || [];
-    onSave({ ...f, price, originalPrice, images: imgs, imageData: imgs[0] || null, rating: +f.rating, reviews: Math.round(+f.reviews) || 0, badge: f.badge || null });
+    onSave({
+      ...f,
+      price,
+      originalPrice,
+      images: imgs,
+      imageData: imgs[0] || null,
+      rating: Number(f.rating) || 0,
+      reviews: Math.round(+f.reviews) || 0,
+      badge: f.badge || null,
+    });
   };
 
   const imgs = f.images || [];
@@ -400,11 +523,10 @@ function ProductModal({ product, onSave, onClose, categories }) {
           <div><label className="l">Original price (৳) *</label><input className="inp" type="number" min="1" value={f.originalPrice} onChange={(e) => set("originalPrice", e.target.value)} /></div>
           <div className="full"><label className="l">Description</label><textarea className="inp" rows={3} maxLength={1000} value={f.description} onChange={(e) => set("description", e.target.value)} /></div>
           <div className="full">
-            <label className="l">Photos & fallback icon (first photo is main cover)</label>
-            <div className="emoji">{EMOJIS.map((em) => <span key={em} className={!imgs.length && f.image === em ? "on" : ""} onClick={() => set("image", em)}>{em}</span>)}</div>
+            <label className="l">Photos (the first photo is the cover)</label>
             <div style={{ marginBottom: 14 }}>
               <div className="row">
-                <button type="button" className="sm e" disabled={busy} onClick={() => fileRef.current.click()}>{busy ? "Uploading…" : "📷 Upload photos (select multiple)"}</button>
+                <button type="button" className="sm e" disabled={busy} onClick={() => fileRef.current.click()}>{busy ? "Uploading…" : "Upload photos (select multiple)"}</button>
                 {imgs.length > 0 && <button type="button" className="sm d" onClick={() => setF((x) => ({ ...x, images: [], imageData: null }))}>Clear all ({imgs.length})</button>}
               </div>
               {imgs.length > 0 && (
@@ -431,6 +553,54 @@ function ProductModal({ product, onSave, onClose, categories }) {
   );
 }
 
+function CouponModal({ onSave, onClose }) {
+  const [f, setF] = useState({ code: "", discount_type: "percent", discount_value: "", min_order: "0" });
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+
+  const save = () => {
+    const code = f.code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+    const discount_value = Math.round(+f.discount_value);
+    const min_order = Math.max(0, Math.round(+f.min_order) || 0);
+    if (code.length < 3) return alert("Enter a coupon code (3–20 letters or numbers).");
+    if (!(discount_value > 0)) return alert("Enter a valid discount value.");
+    if (f.discount_type === "percent" && discount_value > 90) return alert("Percentage discount cannot exceed 90%.");
+    onSave({ code, discount_type: f.discount_type, discount_value, min_order, active: true });
+  };
+
+  return (
+    <div className="modal" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="mbox">
+        <h3>Create coupon</h3>
+        <div className="mgrid">
+          <div className="full">
+            <label className="l">Coupon code *</label>
+            <input className="inp" maxLength={20} placeholder="e.g. PAW10 or SAVE150" value={f.code} onChange={(e) => set("code", e.target.value.toUpperCase())} />
+          </div>
+          <div>
+            <label className="l">Discount type *</label>
+            <select className="inp" value={f.discount_type} onChange={(e) => set("discount_type", e.target.value)}>
+              <option value="percent">Percentage (%)</option>
+              <option value="fixed">Fixed amount (৳)</option>
+            </select>
+          </div>
+          <div>
+            <label className="l">{f.discount_type === "percent" ? "Discount (%) *" : "Discount (৳) *"}</label>
+            <input className="inp" type="number" min="1" max={f.discount_type === "percent" ? "90" : "50000"} value={f.discount_value} onChange={(e) => set("discount_value", e.target.value)} />
+          </div>
+          <div className="full">
+            <label className="l">Minimum order subtotal (৳)</label>
+            <input className="inp" type="number" min="0" placeholder="0 for no minimum" value={f.min_order} onChange={(e) => set("min_order", e.target.value)} />
+          </div>
+        </div>
+        <div className="row">
+          <button className="btn ghost block" onClick={onClose}>Cancel</button>
+          <button className="btn block" onClick={save}>Create coupon</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const STATUS = { Pending: "#D99A1E", Processing: "#7A4FE0", Delivered: "#1E5B3A", Cancelled: "#C0392B" };
 
 function OrderModal({ order, onClose, onStatus }) {
@@ -443,9 +613,10 @@ function OrderModal({ order, onClose, onStatus }) {
             <button key={s} className="sm" onClick={() => onStatus(order.orderId, s)} style={{ border: `2px solid ${STATUS[s]}`, background: order.status === s ? STATUS[s] : "transparent", color: order.status === s ? "#fff" : STATUS[s] }}>{s}</button>
           ))}
         </div>
-        <div className="note"><b>{order.customer.name}</b><br />📞 {order.customer.phone}<br />{order.customer.address}, {order.customer.city}</div>
+        <div className="note"><b>{order.customer.name}</b><br /><span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><PhoneIcon size={14} /> {order.customer.phone}</span><br />{order.customer.address}, {order.customer.city}</div>
         <div className="note">Payment: <b>{order.payment.method}</b>{order.payment.txId && <> · Trx: <b style={{ color: "var(--mint)" }}>{order.payment.txId}</b></>}</div>
-        {order.items.map((i, k) => <div key={k} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+        {order.items.map((i, k) => <div key={k} className="srow"><span>{i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+        {Number(order.discount) > 0 && <div className="srow" style={{ color: "var(--mint)" }}><span>Coupon{order.coupon_code ? ` (${order.coupon_code})` : ""}</span><span>−৳{Number(order.discount).toLocaleString()}</span></div>}
         <div className="srow"><span>Delivery ({order.customer.city})</span><span>৳{order.delivery}</span></div>
         <div className="stot"><span>Total</span><span>৳{order.total.toLocaleString()}</span></div>
         <button className="btn block" style={{ marginTop: 16 }} onClick={onClose}>Close</button>
@@ -454,15 +625,18 @@ function OrderModal({ order, onClose, onStatus }) {
   );
 }
 
-function Admin({ products, setProducts, orders, setOrders, onLogout }) {
+function Admin({ products, setProducts, orders, setOrders, coupons, setCoupons, onLogout }) {
   const nav = useNavigate();
-  const tab = useLocation().pathname.startsWith(`${VAULT_PATH}/orders`) ? "orders" : "products";
+  const path = useLocation().pathname;
+  const tab = path.startsWith(`${VAULT_PATH}/orders`) ? "orders" : path.startsWith(`${VAULT_PATH}/coupons`) ? "coupons" : "products";
   const [q, setQ] = useState("");
   const [modal, setModal] = useState(null);
+  const [couponModal, setCouponModal] = useState(false);
   const [sel, setSel] = useState(null);
   const cats = [...new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category)])];
   const fp = products.filter((p) => (p.name + p.category).toLowerCase().includes(q.toLowerCase()));
   const fo = orders.filter((o) => (o.orderId + o.customer.name + o.customer.phone).toLowerCase().includes(q.toLowerCase())).sort((a, b) => b.placedAt - a.placedAt);
+  const fc = coupons.filter((c) => c.code.toLowerCase().includes(q.toLowerCase()));
 
   const save = async (p) => {
     const isNew = modal === "add";
@@ -486,29 +660,51 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
     setOrders((prev) => prev.map((o) => (o.orderId === code ? { ...o, status: s } : o)));
     setSel((o) => (o && o.orderId === code ? { ...o, status: s } : o));
   };
+  const saveCoupon = async (c) => {
+    const { data, error } = await supabase.from("coupons").insert(c).select().single();
+    if (error) return alert("Could not create coupon: " + error.message);
+    setCoupons((prev) => [data, ...prev]);
+    setCouponModal(false);
+  };
+  const toggleCoupon = async (c) => {
+    const { error } = await supabase.from("coupons").update({ active: !c.active }).eq("id", c.id);
+    if (error) return alert("Could not update coupon: " + error.message);
+    setCoupons((prev) => prev.map((x) => (x.id === c.id ? { ...x, active: !c.active } : x)));
+  };
+  const removeCoupon = async (id) => {
+    if (!window.confirm("Delete this coupon?")) return;
+    const { error } = await supabase.from("coupons").delete().eq("id", id);
+    if (error) return alert("Could not delete coupon: " + error.message);
+    setCoupons((prev) => prev.filter((x) => x.id !== id));
+  };
 
   const pending = orders.filter((o) => o.status === "Pending").length;
   return (
     <div className="adm">
       {modal && <ProductModal product={modal === "add" ? null : modal} onSave={save} onClose={() => setModal(null)} categories={cats} />}
+      {couponModal && <CouponModal onSave={saveCoupon} onClose={() => setCouponModal(false)} />}
       {sel && <OrderModal order={sel} onClose={() => setSel(null)} onStatus={status} />}
       <div className="adm-h">
         <div className="row"><b style={{ fontFamily: "var(--display)", fontSize: 18 }}>Paw Club admin</b>
           <button className={`nav-btn ${tab === "products" ? "on" : ""}`} onClick={() => { nav(`${VAULT_PATH}/products`); setQ(""); }}>Products</button>
           <button className={`nav-btn ${tab === "orders" ? "on" : ""}`} onClick={() => { nav(`${VAULT_PATH}/orders`); setQ(""); }}>Orders{pending > 0 && ` (${pending})`}</button>
+          <button className={`nav-btn ${tab === "coupons" ? "on" : ""}`} onClick={() => { nav(`${VAULT_PATH}/coupons`); setQ(""); }}>Coupons ({coupons.filter((c) => c.active).length})</button>
         </div>
         <button className="nav-btn" onClick={onLogout}>Sign out</button>
       </div>
       <div className="adm-c">
         <div className="adm-stats">
           {(tab === "products"
-            ? [["Products", products.length], ["Categories", cats.length], ["On sale badges", products.filter((p) => p.badge).length], ["Avg. rating", (products.reduce((s, p) => s + p.rating, 0) / (products.length || 1)).toFixed(1)]]
-            : [["Orders", orders.length], ["Pending", pending], ["Processing", orders.filter((o) => o.status === "Processing").length], ["Delivered", orders.filter((o) => o.status === "Delivered").length]]
+            ? [["Products", products.length], ["Categories", cats.length], ["On sale badges", products.filter((p) => p.badge).length], ["Reviewed items", products.filter((p) => p.reviews > 0).length]]
+            : tab === "orders"
+            ? [["Orders", orders.length], ["Pending", pending], ["Processing", orders.filter((o) => o.status === "Processing").length], ["Delivered", orders.filter((o) => o.status === "Delivered").length]]
+            : [["Total coupons", coupons.length], ["Active", coupons.filter((c) => c.active).length], ["Paused", coupons.filter((c) => !c.active).length], ["Percent offers", coupons.filter((c) => c.discount_type === "percent").length]]
           ).map(([l, v]) => <div key={l} className="stat"><small>{l}</small><div>{v}</div></div>)}
         </div>
         <div className="row" style={{ justifyContent: "space-between", marginBottom: 16 }}>
           <input className="inp" style={{ maxWidth: 300, margin: 0 }} placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />
           {tab === "products" && <button className="btn" onClick={() => setModal("add")}>＋ Add product</button>}
+          {tab === "coupons" && <button className="btn" onClick={() => setCouponModal(true)}>＋ Create coupon</button>}
         </div>
         <div className="tbl">
           {tab === "products" ? (
@@ -517,7 +713,7 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
               <tbody>
                 {fp.map((p) => (
                   <tr key={p.id}>
-                    <td><b>{p.image} {p.name}</b>{getGallery(p).length > 1 && <small style={{ color: "var(--muted)", marginLeft: 6 }}>({getGallery(p).length} photos)</small>}</td><td>{p.category}</td>
+                    <td><b>{p.name}</b>{getGallery(p).length > 1 && <small style={{ color: "var(--muted)", marginLeft: 6 }}>({getGallery(p).length} photos)</small>}</td><td>{p.category}</td>
                     <td>৳{p.price.toLocaleString()} <s style={{ color: "var(--faint)" }}>৳{p.originalPrice.toLocaleString()}</s></td>
                     <td>{p.badge || "—"}</td>
                     <td><button className="sm e" onClick={() => setModal(p)}>Edit</button><button className="sm d" onClick={() => removeProduct(p.id)}>Delete</button></td>
@@ -526,20 +722,39 @@ function Admin({ products, setProducts, orders, setOrders, onLogout }) {
                 {fp.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--faint)" }}>No products match your search.</td></tr>}
               </tbody>
             </table>
-          ) : (
+          ) : tab === "orders" ? (
             <table>
               <thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Payment</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {fo.map((o) => (
                   <tr key={o.orderId}>
                     <td><b style={{ color: "var(--green)" }}>{o.orderId}</b><br /><small>{new Date(o.placedAt).toLocaleDateString()}</small></td>
-                    <td>{o.customer.name}<br /><small>📞 {o.customer.phone} · {o.customer.city}</small></td>
+                    <td>{o.customer.name}<br /><small style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><PhoneIcon size={12} /> {o.customer.phone} · {o.customer.city}</small></td>
                     <td><b>৳{o.total.toLocaleString()}</b></td><td>{o.payment.method}{o.payment.txId && <><br /><small>{o.payment.txId}</small></>}</td>
                     <td><span style={{ color: STATUS[o.status], fontWeight: 700 }}>{o.status}</span></td>
                     <td><button className="sm v" onClick={() => setSel(o)}>View</button></td>
                   </tr>
                 ))}
                 {fo.length === 0 && <tr><td colSpan={6} style={{ textAlign: "center", padding: 40, color: "var(--faint)" }}>No orders yet. New orders will show up here.</td></tr>}
+              </tbody>
+            </table>
+          ) : (
+            <table>
+              <thead><tr><th>Code</th><th>Discount</th><th>Min. order</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                {fc.map((c) => (
+                  <tr key={c.id}>
+                    <td><b style={{ color: "var(--green)", letterSpacing: 0.5 }}>{c.code}</b></td>
+                    <td><b>{c.discount_type === "percent" ? `${c.discount_value}% OFF` : `৳${Number(c.discount_value).toLocaleString()} OFF`}</b></td>
+                    <td>{Number(c.min_order) > 0 ? `৳${Number(c.min_order).toLocaleString()}` : "None"}</td>
+                    <td><span style={{ color: c.active ? "#1E5B3A" : "#C0392B", fontWeight: 700 }}>{c.active ? "Active" : "Paused"}</span></td>
+                    <td>
+                      <button className="sm e" onClick={() => toggleCoupon(c)}>{c.active ? "Pause" : "Activate"}</button>
+                      <button className="sm d" onClick={() => removeCoupon(c.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+                {fc.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 40, color: "var(--faint)" }}>No coupons yet. Click "+ Create coupon" to add an offer.</td></tr>}
               </tbody>
             </table>
           )}
@@ -637,7 +852,7 @@ function AdminGate({ onDone, onBack }) {
 
 const shopLink = (c) => (c && c !== "All" ? `/shop?category=${encodeURIComponent(c)}` : "/shop");
 
-function ProductPage({ products, loaded, wish, toggle, add }) {
+function ProductPage({ products, setProducts, loaded, wish, toggle, add, notify }) {
   const { id } = useParams();
   const nav = useNavigate();
   const [qty, setQty] = useState(1);
@@ -645,12 +860,64 @@ function ProductPage({ products, loaded, wish, toggle, add }) {
   const [zoomed, setZoomed] = useState(false);
   const [origin, setOrigin] = useState({ x: 50, y: 50 });
 
-  useEffect(() => { setQty(1); setActiveIdx(0); setZoomed(false); setOrigin({ x: 50, y: 50 }); }, [id]);
+  const [revList, setRevList] = useState([]);
+  const [revRating, setRevRating] = useState(5);
+  const [revCode, setRevCode] = useState("");
+  const [revPhone, setRevPhone] = useState("");
+  const [revComment, setRevComment] = useState("");
+  const [revBusy, setRevBusy] = useState(false);
+
+  const loadReviews = () => {
+    supabase
+      .from("product_reviews")
+      .select("id, reviewer_name, rating, comment, created_at")
+      .eq("product_id", Number(id))
+      .order("created_at", { ascending: false })
+      .then(({ data }) => setRevList(data || []));
+  };
+
+  useEffect(() => {
+    setQty(1);
+    setActiveIdx(0);
+    setZoomed(false);
+    setOrigin({ x: 50, y: 50 });
+    loadReviews();
+  }, [id]);
 
   const selected = products.find((p) => String(p.id) === id);
   if (!loaded) return <div className="sec"><div className="empty"><div>🐾</div><b>Loading…</b></div></div>;
   if (!selected)
-    return <div className="sec"><div className="empty"><div>😿</div><b>Product not found</b>It may have been removed.<br /><button className="btn" onClick={() => nav("/shop")}>Browse products</button></div></div>;
+    return <div className="sec"><div className="empty"><div>🐾</div><b>Product not found</b>It may have been removed.<br /><button className="btn" onClick={() => nav("/shop")}>Browse products</button></div></div>;
+
+  const submitReview = async () => {
+    if (!revCode.trim() || !PHONE_RE.test(revPhone)) {
+      return notify("Enter your Order Code and 11-digit Phone Number", "#C0392B");
+    }
+    setRevBusy(true);
+    const { data, error } = await supabase.rpc("submit_review", {
+      p_product_id: selected.id,
+      p_order_code: revCode.trim().toUpperCase(),
+      p_phone: revPhone.trim(),
+      p_rating: revRating,
+      p_comment: revComment.trim(),
+    });
+    setRevBusy(false);
+    if (error || data?.error) {
+      return notify(data?.error || error?.message || "Could not submit review", "#C0392B", 4000);
+    }
+    setProducts((prev) =>
+      prev.map((x) =>
+        x.id === selected.id
+          ? { ...x, rating: Number(data.rating) || revRating, reviews: Number(data.reviews) || x.reviews + 1 }
+          : x
+      )
+    );
+    setRevCode("");
+    setRevPhone("");
+    setRevComment("");
+    loadReviews();
+    notify("Thank you! Your verified review has been posted.");
+  };
 
   const off = pct(selected);
   const gallery = getGallery(selected);
@@ -707,11 +974,11 @@ function ProductPage({ products, loaded, wish, toggle, add }) {
                   className="zoom-pill"
                   onClick={(e) => { e.stopPropagation(); setOrigin({ x: 50, y: 50 }); setZoomed((z) => !z); }}
                 >
-                  {zoomed ? "🔍 Zoom out" : "🔍 Zoom in"}
+                  {zoomed ? "Zoom out" : "Zoom in"}
                 </button>
               </>
             ) : (
-              <span>{selected.image}</span>
+              <span>🐾</span>
             )}
           </div>
           {gallery.length > 1 && (
@@ -733,7 +1000,11 @@ function ProductPage({ products, loaded, wish, toggle, add }) {
         <div>
           <div className="card-cat">{selected.category}</div>
           <h2 className="dname">{selected.name}</h2>
-          <div className="rate">{stars(selected.rating)}<span>{selected.rating} · {selected.reviews} reviews</span></div>
+          {selected.reviews > 0 ? (
+            <div className="rate">{stars(selected.rating)}<span>{selected.rating.toFixed(1)} · {selected.reviews} {selected.reviews === 1 ? "review" : "reviews"}</span></div>
+          ) : (
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>No customer reviews yet</div>
+          )}
           <p className="ddesc">{selected.description}</p>
           <div className="price-row" style={{ marginBottom: 22 }}>
             <span className="price" style={{ fontSize: 34 }}>৳{selected.price.toLocaleString()}</span>
@@ -742,7 +1013,52 @@ function ProductPage({ products, loaded, wish, toggle, add }) {
           </div>
           <div className="row" style={{ marginBottom: 20 }}><b>Quantity</b><div className="qty"><button onClick={() => setQty((q) => Math.max(1, q - 1))}>−</button><span>{qty}</span><button onClick={() => setQty((q) => Math.min(20, q + 1))}>+</button></div></div>
           <div className="row"><button className="btn block" onClick={() => add(selected, qty)}>Add to cart</button><button className="btn ghost block" onClick={() => { add(selected, qty); nav("/cart"); }}>Buy now</button></div>
-          <button className="back" style={{ marginTop: 14, marginBottom: 0 }} onClick={() => toggle(selected.id)}>{wish.includes(selected.id) ? "❤️ Saved to wishlist" : "🤍 Add to wishlist"}</button>
+          <button className="back" style={{ marginTop: 14, marginBottom: 0 }} onClick={() => toggle(selected.id)}><Heart filled={wish.includes(selected.id)} size={16} className="link-ico" />{wish.includes(selected.id) ? "Saved to wishlist" : "Add to wishlist"}</button>
+        </div>
+      </div>
+
+      <div className="rev-sec">
+        <h3>Customer Reviews {selected.reviews > 0 && `(${selected.reviews})`}</h3>
+        <div className="rev-grid">
+          <div>
+            {revList.length === 0 ? (
+              <div className="note">No reviews yet. Purchased this item? Share your cat's feedback using your order code!</div>
+            ) : (
+              revList.map((r) => (
+                <div key={r.id} className="rev-card">
+                  <div className="rev-top">
+                    <div>
+                      <b>{r.reviewer_name}</b> <span className="rev-badge">Verified Buyer</span>
+                    </div>
+                    <span className="rate">{stars(r.rating)}</span>
+                  </div>
+                  {r.comment && <p style={{ fontSize: 14, color: "var(--ink)", lineHeight: 1.6, marginTop: 4 }}>{r.comment}</p>}
+                  <small style={{ color: "var(--faint)", display: "block", marginTop: 6 }}>{new Date(r.created_at).toLocaleDateString()}</small>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="box" style={{ marginBottom: 0 }}>
+            <h4>Write a verified review</h4>
+            <label className="l">Your rating *</label>
+            <div className="star-pick">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" className={`star-btn ${revRating >= n ? "on" : ""}`} onClick={() => setRevRating(n)}>
+                  ★
+                </button>
+              ))}
+            </div>
+            <label className="l">Order code *</label>
+            <input className="inp" placeholder="e.g. PC-8X29AB" maxLength={15} value={revCode} onChange={(e) => setRevCode(e.target.value.toUpperCase())} />
+            <label className="l">Phone number used on order *</label>
+            <input className="inp" inputMode="numeric" placeholder="01XXXXXXXXX" maxLength={11} value={revPhone} onChange={(e) => setRevPhone(e.target.value.replace(/\D/g, ""))} />
+            <label className="l">Review (optional)</label>
+            <textarea className="inp" rows={3} maxLength={500} placeholder="How did your cat like it?" value={revComment} onChange={(e) => setRevComment(e.target.value)} />
+            <button type="button" className="btn block" disabled={revBusy} onClick={submitReview}>
+              {revBusy ? "Submitting…" : "Submit review"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -759,9 +1075,9 @@ function OrderPage() {
     supabase.rpc("get_order", { oid: orderId }).then(({ data, error }) => setDone(error ? null : data?.[0] ?? null));
   }, [orderId]);
   if (done === undefined)
-    return <div className="cart"><div className="empty"><div>🧾</div><b>Loading your order…</b></div></div>;
+    return <div className="cart"><div className="empty"><div>🐾</div><b>Loading your order…</b></div></div>;
   if (!done)
-    return <div className="cart"><div className="empty"><div>🧾</div><b>Order not found</b>We couldn't find that order.<br /><button className="btn" onClick={() => nav("/")}>Go home</button></div></div>;
+    return <div className="cart"><div className="empty"><div>🐾</div><b>Order not found</b>We couldn't find that order.<br /><button className="btn" onClick={() => nav("/")}>Go home</button></div></div>;
   return (
     <div className="cart">
       <div className="receipt" style={{ padding: 0 }}>
@@ -770,7 +1086,8 @@ function OrderPage() {
           <div className="oid">{done.code}</div>
           <div className="box"><h4>Delivering to</h4><div style={{ lineHeight: 1.8 }}><b>{done.name}</b> · {done.city}</div></div>
           <div className="box"><h4>Items</h4>
-            {done.items.map((i, k) => <div key={k} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+            {done.items.map((i, k) => <div key={k} className="srow"><span>{i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+            {Number(done.discount) > 0 && <div className="srow" style={{ color: "var(--mint)" }}><span>Coupon discount</span><span>−৳{Number(done.discount).toLocaleString()}</span></div>}
             <div className="srow"><span>Delivery</span><span>৳{done.delivery}</span></div>
             <div className="stot"><span>Total</span><span style={{ color: "var(--green)" }}>৳{done.total.toLocaleString()}</span></div>
           </div>
@@ -793,6 +1110,7 @@ function PawClubApp() {
   const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState(false);
   const [orders, setOrders] = useState([]);
+  const [coupons, setCoupons] = useState([]);
   const [session, setSession] = useState(null);
   const [aal, setAal] = useState(null);
   const [authReady, setAuthReady] = useState(false);
@@ -801,6 +1119,9 @@ function PawClubApp() {
   const [search, setSearch] = useState("");
   const [pm, setPm] = useState("");
   const [txId, setTxId] = useState("");
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponBusy, setCouponBusy] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", address: "", city: "" });
   const [toast, setToast] = useState(null);
   const [menu, setMenu] = useState(false); // mobile side menu
@@ -841,25 +1162,58 @@ function PawClubApp() {
   }, []);
   const authed = !!session && (!REQUIRE_MFA || aal === "aal2");
 
-  // orders are only fetched once the admin is fully signed in (the database enforces this too)
+  // orders & coupons are only fetched once the admin is fully signed in
   useEffect(() => {
-    if (!authed) { setOrders([]); return; }
+    if (!authed) { setOrders([]); setCoupons([]); return; }
     supabase.from("orders").select("*").order("created_at", { ascending: false }).then(({ data }) => data && setOrders(data.map(fromOrder)));
+    supabase.from("coupons").select("*").order("created_at", { ascending: false }).then(({ data }) => data && setCoupons(data));
   }, [authed]);
 
   useEffect(() => { try { localStorage.setItem("pc_cart", JSON.stringify(cart)); } catch {} }, [cart]);
   useEffect(() => { try { localStorage.setItem("pc_wish", JSON.stringify(wish)); } catch {} }, [wish]);
   useEffect(() => { window.scrollTo(0, 0); setMenu(false); }, [pathname]);
   useEffect(() => { document.body.style.overflow = menu ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menu]);
-  useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
+  useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS + EXTRA_CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
 
   const notify = (msg, color = "#2E8B57", ms = 2500) => { setToast({ msg, color }); setTimeout(() => setToast(null), ms); };
   const cats = [...new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category)])];
+  const isDhaka = form.city.trim().toLowerCase() === "dhaka";
   const delivery = getDelivery(form.city);
   const shown = products.filter((p) => (category === "All" || p.category === category) && (p.name + p.category).toLowerCase().includes(search.toLowerCase()));
   const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const count = cart.reduce((s, i) => s + i.qty, 0);
-  const total = subtotal + delivery;
+  const discount = calcDiscount(appliedCoupon, subtotal);
+  const total = Math.max(0, subtotal - discount) + delivery;
+
+  useEffect(() => {
+    if (pm === "cod" && !isDhaka) setPm("");
+  }, [pm, isDhaka]);
+
+  useEffect(() => {
+    if (appliedCoupon && subtotal < Number(appliedCoupon.min_order || 0)) {
+      setAppliedCoupon(null);
+    }
+  }, [subtotal, appliedCoupon]);
+
+  const applyCoupon = async () => {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) return notify("Enter a coupon code", "#C0392B");
+    setCouponBusy(true);
+    const { data, error } = await supabase
+      .from("coupons")
+      .select("*")
+      .eq("code", code)
+      .eq("active", true)
+      .maybeSingle();
+    setCouponBusy(false);
+    if (error || !data) return notify("Invalid or expired coupon code", "#C0392B");
+    if (subtotal < Number(data.min_order || 0)) {
+      return notify(`Minimum order of ৳${Number(data.min_order).toLocaleString()} required for ${data.code}`, "#C0392B", 4000);
+    }
+    setAppliedCoupon(data);
+    setCouponInput(data.code);
+    notify(`Coupon ${data.code} applied!`);
+  };
 
   const add = (p, n = 1) => { setCart((c) => c.find((i) => i.id === p.id) ? c.map((i) => (i.id === p.id ? { ...i, qty: Math.min(20, i.qty + n) } : i)) : [...c, { ...p, qty: n }]); notify(`${p.name} added to cart`); };
   const setQ = (id, q) => setCart((c) => (q < 1 ? c.filter((i) => i.id !== id) : c.map((i) => (i.id === id ? { ...i, qty: Math.min(20, q) } : i))));
@@ -867,7 +1221,7 @@ function PawClubApp() {
   const go = (path) => { nav(path); setMenu(false); };
   const view = (p) => nav(`/product/${p.id}`);
 
-  // The server recalculates every price. We only send product ids and quantities.
+  // The server recalculates every price and coupon discount. We send product ids, quantities, and couponCode.
   const place = async () => {
     if (placing) return;
     setPlacing(true);
@@ -876,6 +1230,7 @@ function PawClubApp() {
         items: cart.map(({ id, qty }) => ({ id, qty })),
         customer: { name: form.name, phone: form.phone, address: form.address, city: form.city },
         payment: { method: pm, txId },
+        couponCode: appliedCoupon?.code || null,
         turnstileToken: token,
       },
     });
@@ -897,7 +1252,7 @@ function PawClubApp() {
       }
       return notify(msg, "#C0392B", 7000);
     }
-    setCart([]); setPm(""); setTxId("");
+    setCart([]); setPm(""); setTxId(""); setAppliedCoupon(null); setCouponInput("");
     nav(`/order/${data.id}`, { replace: true });
   };
 
@@ -906,12 +1261,12 @@ function PawClubApp() {
     if (!authReady) return <div className="login"><div className="login-card"><h2>Loading…</h2></div></div>;
     if (!authed) return <AdminGate onDone={refreshAuth} onBack={() => nav("/")} />;
     if (pathname.replace(/\/+$/, "") === VAULT_PATH) return <Navigate to={`${VAULT_PATH}/products`} replace />;
-    return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} onLogout={async () => { await supabase.auth.signOut(); nav("/"); }} />;
+    return <Admin products={products} setProducts={setProducts} orders={orders} setOrders={setOrders} coupons={coupons} setCoupons={setCoupons} onLogout={async () => { await supabase.auth.signOut(); nav("/"); }} />;
   }
 
   const grid = (list) => <div className="grid">{list.map((p) => <Card key={p.id} p={p} onView={() => view(p)} onAdd={() => add(p)} wish={wish} toggle={toggle} />)}</div>;
   const loadingBox = <div className="empty"><div>🐾</div><b>Loading products…</b></div>;
-  const errorBox = <div className="empty"><div>😿</div><b>Couldn't load products</b>Please check your connection and refresh the page.</div>;
+  const errorBox = <div className="empty"><div>🐾</div><b>Couldn't load products</b>Please check your connection and refresh the page.</div>;
 
   // ---------- Home: / ----------
   const homeEl = (
@@ -924,18 +1279,18 @@ function PawClubApp() {
           <div className="hero-btns"><button className="btn" onClick={() => go("/shop")}>Shop for your cat</button><button className="btn ghost" onClick={() => go(shopLink("Toys"))}>Browse toys</button></div>
         </div></div>
       </section>
-      <div className="strip"><div className="strip-in">{[0, 1, 2, 3].map((k) => <span key={k}>🐾 Purr-fect picks 🐟 Treats 🧶 Toys 🛏️ Naps 💖 Cat approved</span>)}</div></div>
+      <div className="strip"><div className="strip-in">{[0, 1, 2, 3].map((k) => <span key={k}>Purr-fect picks 🐾 Treats 🐾 Toys 🐾 Naps 🐾 Cat approved 🐾</span>)}</div></div>
       <div className="perks"><div className="perks-in">
-        {[["🚚", "Fast delivery", "Dhaka ৳80 · Outside ৳150"], ["✅", "Vet-approved picks", "Safe for everyday use"], ["💳", "Easy payment", "bKash, Nagad, COD"], ["💬", "Cat-parent support", "We reply within hours"]].map(([i, t, s]) => <div key={t} className="perk"><span>{i}</span><div>{t}<small>{s}</small></div></div>)}
+        {[["truck", "Fast delivery", "Dhaka ৳80 · Outside ৳150"], ["shield", "Vet-approved picks", "Safe for everyday use"], ["card", "Easy payment", "bKash, Nagad, COD"], ["chat", "Cat-parent support", "We reply within hours"]].map(([i, t, s]) => <div key={t} className="perk"><span className="perk-ico"><PerkIcon name={i} /></span><div>{t}<small>{s}</small></div></div>)}
       </div></div>
       <div className="sec">
-        <h2>Cat favourites 💖</h2><p className="sub">What other cat parents keep re-ordering</p>
+        <h2>Cat favourites</h2><p className="sub">What other cat parents keep re-ordering</p>
         {loadErr ? errorBox : !loaded ? loadingBox : grid(products.filter((p) => p.badge).slice(0, 8))}
         <div style={{ textAlign: "center", marginTop: 32 }}><button className="btn" onClick={() => go("/shop")}>See all products</button></div>
       </div>
       <div className="band"><div className="sec">
-        <h2>Shop by category 🐾</h2><p className="sub">Jump straight to what your cat needs</p>
-        <div className="cats">{cats.map((c) => <div key={c} className="cat" onClick={() => go(shopLink(c))}><div>{catIcons[c] || "🐾"}</div><b>{c}</b><small>{products.filter((p) => p.category === c).length} products</small></div>)}</div>
+        <h2>Shop by category</h2><p className="sub">Jump straight to what your cat needs</p>
+        <div className="cats">{cats.map((c) => <div key={c} className="cat" onClick={() => go(shopLink(c))}><div>🐾</div><b>{c}</b><small>{products.filter((p) => p.category === c).length} products</small></div>)}</div>
       </div></div>
     </>
   );
@@ -947,7 +1302,7 @@ function PawClubApp() {
       <input className="inp" style={{ maxWidth: 380 }} placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} />
       <div className="tabs">{["All", ...cats].map((c) => <button key={c} className={`tab ${category === c ? "on" : ""}`} onClick={() => nav(shopLink(c))}>{c}</button>)}</div>
       {loadErr ? errorBox : !loaded ? loadingBox : grid(shown)}
-      {loaded && !loadErr && shown.length === 0 && <div className="empty"><div>😿</div><b>No products found</b>Try another search or category.<br /><button className="btn" onClick={() => { setSearch(""); nav("/shop"); }}>Clear filters</button></div>}
+      {loaded && !loadErr && shown.length === 0 && <div className="empty"><div>🐾</div><b>No products found</b>Try another search or category.<br /><button className="btn" onClick={() => { setSearch(""); nav("/shop"); }}>Clear filters</button></div>}
     </div>
   );
 
@@ -955,7 +1310,7 @@ function PawClubApp() {
   const wishEl = (
     <div className="sec">
       <h2>Wishlist</h2><p className="sub">Saved for later</p>
-      {wish.length === 0 ? <div className="empty"><div>🤍</div><b>Nothing saved yet</b>Tap the heart on any product to save it.<br /><button className="btn" onClick={() => go("/shop")}>Browse products</button></div> : grid(products.filter((p) => wish.includes(p.id)))}
+      {wish.length === 0 ? <div className="empty"><div>🐾</div><b>Nothing saved yet</b>Tap the heart on any product to save it.<br /><button className="btn" onClick={() => go("/shop")}>Browse products</button></div> : grid(products.filter((p) => wish.includes(p.id)))}
     </div>
   );
 
@@ -965,10 +1320,10 @@ function PawClubApp() {
   const formOk = form.name.trim().length >= 2 && phoneOk && form.address.trim().length >= 5 && CITIES.includes(form.city);
   const pmObj = PAYMENT_METHODS.find((m) => m.id === pm);
   const txOk = !pmObj?.needsTx || /^[A-Za-z0-9]{6,30}$/.test(txId);
-  const payOk = !!pmObj && txOk;
+  const payOk = !!pmObj && txOk && !(pm === "cod" && !isDhaka);
   const checkoutEl =
     cart.length === 0 ? (
-      <div className="cart"><div className="empty"><div>🛒</div><b>Your cart is empty</b>Add something your cat will love.<br /><button className="btn" onClick={() => go("/shop")}>Start shopping</button></div></div>
+      <div className="cart"><div className="empty"><div>🐾</div><b>Your cart is empty</b>Add something your cat will love.<br /><button className="btn" onClick={() => go("/shop")}>Start shopping</button></div></div>
     ) : step >= 3 && !formOk ? (
       <Navigate to="/checkout/delivery" replace />
     ) : step === 4 && !payOk ? (
@@ -985,7 +1340,7 @@ function PawClubApp() {
               <div className="item-info"><b>{i.name}</b><div style={{ color: "var(--green)", fontWeight: 700 }}>৳{i.price.toLocaleString()}</div></div>
               <div className="qty"><button onClick={() => setQ(i.id, i.qty - 1)}>−</button><span>{i.qty}</span><button onClick={() => setQ(i.id, i.qty + 1)}>+</button></div>
               <b style={{ minWidth: 70, textAlign: "right" }}>৳{(i.price * i.qty).toLocaleString()}</b>
-              <button className="back" style={{ margin: 0 }} aria-label="Remove" onClick={() => setQ(i.id, 0)}>🗑</button>
+              <button className="back" style={{ margin: 0 }} aria-label="Remove" onClick={() => setQ(i.id, 0)}>Remove</button>
             </div>
           ))}
           <div className="box"><div className="srow"><span>Delivery</span><span>Calculated next step</span></div><div className="stot"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div>
@@ -994,7 +1349,7 @@ function PawClubApp() {
 
         {step === 2 && (<>
           <div><label className="l">Full name *</label><input className="inp" maxLength={80} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>
-          <div><label className="l">Phone number *</label><input className="inp" inputMode="numeric" maxLength={11} placeholder="01XXXXXXXXX" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "") }))} />
+          <div><label className="l" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><PhoneIcon size={14} /> Phone number *</label><input className="inp" inputMode="numeric" maxLength={11} placeholder="01XXXXXXXXX" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "") }))} />
             {form.phone.length >= 11 && !phoneOk && <p style={{ color: "#C0392B", fontSize: 13, marginTop: -8, marginBottom: 12 }}>Enter a valid 11-digit mobile number starting with 01.</p>}</div>
           <div><label className="l">Full address *</label><input className="inp" maxLength={200} placeholder="House, road, area" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></div>
           <div><label className="l">City *</label>
@@ -1002,23 +1357,73 @@ function PawClubApp() {
               <option value="">Select city</option>
               {CITIES.map((c) => <option key={c} value={c}>{c}</option>)}
             </select></div>
-          {form.city && <div className="note">{delivery === 80 ? "Dhaka delivery: ৳80" : "Outside Dhaka delivery: ৳150"}</div>}
+          {form.city && <div className="note">{isDhaka ? "Dhaka delivery: ৳80 (Cash on Delivery available)" : "Outside Dhaka delivery: ৳150 (Prepayment via bKash / Nagad required)"}</div>}
           <div className="box"><div className="srow"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div><div className="srow"><span>Delivery</span><span>{form.city ? `৳${delivery}` : "—"}</span></div><div className="stot"><span>Total</span><span>৳{(form.city ? total : subtotal).toLocaleString()}</span></div></div>
           <div className="row"><button className="btn ghost block" onClick={() => nav("/cart")}>Back</button><button className="btn block" onClick={() => (formOk ? nav("/checkout/payment") : notify("Please fill in all fields correctly", "#C0392B"))}>Continue to payment</button></div>
         </>)}
 
         {step === 3 && (<>
-          <p style={{ marginBottom: 16, color: "var(--muted)" }}>Total to pay: <b style={{ color: "var(--ink)" }}>৳{total.toLocaleString()}</b> (includes ৳{delivery} delivery)</p>
-          {PAYMENT_METHODS.map((m) => (
-            <div key={m.id} className={`pay ${pm === m.id ? "on" : ""}`} onClick={() => { setPm(m.id); setTxId(""); }}>
-              <span style={{ fontSize: 26 }}>{m.icon}</span>
-              <div><b style={{ color: m.color }}>{m.name}</b><div style={{ fontSize: 13, color: "var(--muted)" }}>{m.number}</div></div>
-              {pm === m.id && <b style={{ marginLeft: "auto", color: "var(--mint)" }}>✓</b>}
-            </div>
-          ))}
+          <div className="box" style={{ padding: 16 }}>
+            <label className="l">Have a coupon code?</label>
+            {appliedCoupon ? (
+              <div className="row" style={{ justifyContent: "space-between", background: "#DDEFE2", border: "2px solid #1E5B3A", borderRadius: 14, padding: "10px 14px" }}>
+                <span style={{ color: "#1E5B3A", fontWeight: 700 }}>
+                  <b>{appliedCoupon.code}</b> applied (−৳{discount.toLocaleString()})
+                </span>
+                <button type="button" className="sm d" style={{ margin: 0 }} onClick={() => { setAppliedCoupon(null); setCouponInput(""); }}>Remove</button>
+              </div>
+            ) : (
+              <div className="row">
+                <input
+                  className="inp"
+                  style={{ marginBottom: 0, textTransform: "uppercase" }}
+                  maxLength={20}
+                  placeholder="Enter promo code"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
+                />
+                <button type="button" className="btn ghost" style={{ whiteSpace: "nowrap" }} disabled={couponBusy} onClick={applyCoupon}>
+                  {couponBusy ? "Checking…" : "Apply"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="box" style={{ padding: 16 }}>
+            <div className="srow"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div>
+            {discount > 0 && <div className="srow" style={{ color: "var(--mint)" }}><span>Coupon ({appliedCoupon.code})</span><span>−৳{discount.toLocaleString()}</span></div>}
+            <div className="srow"><span>Delivery ({form.city})</span><span>৳{delivery}</span></div>
+            <div className="stot"><span>Total to pay</span><span style={{ color: "var(--green)" }}>৳{total.toLocaleString()}</span></div>
+          </div>
+
+          {PAYMENT_METHODS.map((m) => {
+            const disabled = m.id === "cod" && !isDhaka;
+            return (
+              <div
+                key={m.id}
+                className={`pay ${pm === m.id ? "on" : ""}`}
+                style={disabled ? { opacity: 0.48, cursor: "not-allowed", background: "#F5EFE0" } : undefined}
+                onClick={() => {
+                  if (disabled) return notify("Cash on Delivery is only available inside Dhaka", "#C0392B");
+                  setPm(m.id);
+                  setTxId("");
+                }}
+              >
+                <PaymentLogo method={m} />
+                <div>
+                  <b style={{ color: m.color }}>{m.name}</b>
+                  <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                    {disabled ? "Available inside Dhaka only" : m.number}
+                  </div>
+                </div>
+                {pm === m.id && !disabled && <b style={{ marginLeft: "auto", color: "var(--mint)" }}>✓</b>}
+              </div>
+            );
+          })}
           {pmObj && pmObj.needsTx && (
             <div className="note">
-              {pm === "bank" ? "Transfer the total to the account above, then enter the reference ID." : <>Open the app and choose <b>Send Money</b> to <b>{pmObj.number}</b>, then enter the Transaction ID from the SMS.</>}
+              Open the <b>{pmObj.name}</b> app and choose <b>Send Money</b> of <b>৳{total.toLocaleString()}</b> to <b>{pmObj.number}</b>, then enter the Transaction ID from the SMS.
               <input className="inp" style={{ marginTop: 10, marginBottom: 0 }} maxLength={30} placeholder="Transaction ID (letters and numbers)" value={txId} onChange={(e) => setTxId(e.target.value.trim())} />
             </div>
           )}
@@ -1029,7 +1434,8 @@ function PawClubApp() {
 
         {step === 4 && (<>
           <div className="box"><h4>Items</h4>
-            {cart.map((i) => <div key={i.id} className="srow"><span>{i.image} {i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+            {cart.map((i) => <div key={i.id} className="srow"><span>{i.name} × {i.qty}</span><span>৳{(i.price * i.qty).toLocaleString()}</span></div>)}
+            {discount > 0 && <div className="srow" style={{ color: "var(--mint)" }}><span>Coupon ({appliedCoupon.code})</span><span>−৳{discount.toLocaleString()}</span></div>}
             <div className="srow"><span>Delivery to {form.city}</span><span>৳{delivery}</span></div><div className="stot"><span>Total</span><span>৳{total.toLocaleString()}</span></div></div>
           <div className="box"><h4>Delivery</h4><b>{form.name}</b> · {form.phone}<br /><span style={{ color: "var(--muted)" }}>{form.address}, {form.city}</span></div>
           <div className="box"><h4>Payment</h4>{pmObj?.name}{txId && ` · ${txId}`}</div>
@@ -1041,7 +1447,7 @@ function PawClubApp() {
       </div>
     );
 
-  const notFound = <div className="sec"><div className="empty"><div>😿</div><b>Page not found</b>This page doesn't exist.<br /><button className="btn" onClick={() => go("/")}>Go home</button></div></div>;
+  const notFound = <div className="sec"><div className="empty"><div>🐾</div><b>Page not found</b>This page doesn't exist.<br /><button className="btn" onClick={() => go("/")}>Go home</button></div></div>;
   const showFooter = !/^\/(cart|checkout|order)/.test(pathname);
   const on = (test) => (test ? "on" : "");
 
@@ -1055,11 +1461,11 @@ function PawClubApp() {
           <input className="search" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value && !pathname.startsWith("/shop")) nav("/shop"); }} />
           <nav className={`nav ${menu ? "open" : ""}`}>
             <input className="inp dsearch" placeholder="Search food, toys, beds…" value={search} onChange={(e) => { setSearch(e.target.value); if (e.target.value && !pathname.startsWith("/shop")) nav("/shop"); }} />
-            <button className={`nav-btn ${on(pathname === "/")}`} onClick={() => go("/")}>Home</button>
+            <button className={`nav-btn ${on(pathname === "/")}`} onClick={() => go("/")}><HomeIcon size={16} /> Home</button>
             <button className={`nav-btn ${on(pathname.startsWith("/shop") || pathname.startsWith("/product"))}`} onClick={() => go("/shop")}>Shop</button>
             <button className={`nav-btn ${on(pathname === "/wishlist")}`} onClick={() => go("/wishlist")}>Wishlist{wish.length ? ` (${wish.length})` : ""}</button>
           </nav>
-          <button className="cart-btn" onClick={() => go("/cart")}>🛒 Cart{count ? ` (${count})` : ""}</button>
+          <button className="cart-btn" onClick={() => go("/cart")}>Cart{count ? ` (${count})` : ""}</button>
           <button className="burger" aria-label={menu ? "Close menu" : "Open menu"} aria-expanded={menu} onClick={() => setMenu((m) => !m)}>{menu ? "✕" : "☰"}</button>
         </div>
       </header>
@@ -1067,7 +1473,7 @@ function PawClubApp() {
       <Routes>
         <Route path="/" element={homeEl} />
         <Route path="/shop" element={shopEl} />
-        <Route path="/product/:id" element={<ProductPage products={products} loaded={loaded} wish={wish} toggle={toggle} add={add} />} />
+        <Route path="/product/:id" element={<ProductPage products={products} setProducts={setProducts} loaded={loaded} wish={wish} toggle={toggle} add={add} notify={notify} />} />
         <Route path="/wishlist" element={wishEl} />
         <Route path="/cart" element={checkoutEl} />
         <Route path="/checkout/delivery" element={checkoutEl} />
@@ -1081,11 +1487,24 @@ function PawClubApp() {
         <footer className="foot">
           <div className="foot-grid">
             <div><h5>Paw Club</h5><p>Quality food, toys and comfort for cats and the people who love them.</p></div>
-            <div><h5>Contact</h5><p>📞 01XXXXXXXXX</p><p>✉️ hello@pawclub.com.bd</p><p>📍 Your shop address, Dhaka</p></div>
+            <div>
+              <h5>Contact</h5>
+              <a className="foot-line" href={`tel:${SHOP_PHONE}`}><PhoneIcon size={15} /> {SHOP_PHONE}</a>
+              <p>pawclubbd@gmail.com</p>
+              <p>Dhaka, Bangladesh</p>
+            </div>
             <div><h5>Categories</h5>{cats.map((c) => <a key={c} onClick={() => go(shopLink(c))}>{c}</a>)}</div>
-            <div><h5>Payment</h5>{PAYMENT_METHODS.map((m) => <p key={m.id}>{m.icon} {m.name}</p>)}</div>
+            <div>
+              <h5>Payment</h5>
+              {PAYMENT_METHODS.map((m) => (
+                <div key={m.id} className="foot-pay">
+                  <PaymentLogo method={m} />
+                  <span>{m.name}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="foot-b">Made with ❤️ in Bangladesh</div>
+          <div className="foot-b">Made with care in Bangladesh</div>
         </footer>
       )}
     </div>
