@@ -10,6 +10,10 @@ import introVideo from "./assets/intro_video.mp4"; // hero intro video
 const REQUIRE_MFA = true;
 const TURNSTILE_SITEKEY = import.meta.env.VITE_TURNSTILE_SITEKEY;
 
+// The name in the URL of your Supabase Edge Function (Edge Functions page -> URL column).
+// Yours is "hyper-worker". If you ever deploy a function named "place-order", change it here.
+const ORDER_FUNCTION = "hyper-worker";
+
 // Secret admin route loaded strictly from VITE_VAULT_PATH (no hardcoded fallback; /admin shows 404)
 const RAW_VAULT = (import.meta.env.VITE_VAULT_PATH || "").trim().replace(/\/+$/, "");
 const VAULT_PATH = RAW_VAULT && RAW_VAULT !== "/" ? (RAW_VAULT.startsWith("/") ? RAW_VAULT : `/${RAW_VAULT}`) : "";
@@ -188,8 +192,8 @@ label.l{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
 .rhead h2{font-family:var(--display);font-size:32px}
 .rbody{background:#fff;border:3px solid var(--ink);border-top:none;border-radius:0 0 30px 30px;padding:26px 30px;margin-bottom:24px;box-shadow:var(--pop)}
 .oid{background:var(--butter);border:3px dashed var(--ink);border-radius:18px;text-align:center;padding:10px;margin-bottom:20px;font-family:var(--display);font-size:26px;font-weight:800}
-.toast{position:fixed;bottom:26px;right:26px;background:var(--ink);color:#fff;padding:12px 22px;border-radius:999px;font-weight:700;z-index:9999;display:flex;gap:10px;align-items:center;animation:up .25s ease;border:3px solid #fff;box-shadow:var(--pop)}
-.toast i{width:9px;height:9px;border-radius:50%;display:block}
+.toast{position:fixed;bottom:26px;right:26px;max-width:min(92vw,520px);background:var(--ink);color:#fff;padding:12px 22px;border-radius:24px;font-weight:700;z-index:9999;display:flex;gap:10px;align-items:center;animation:up .25s ease;border:3px solid #fff;box-shadow:var(--pop)}
+.toast i{width:9px;height:9px;border-radius:50%;display:block;flex-shrink:0}
 @keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
@@ -266,7 +270,7 @@ td{padding:12px 16px;border-top:2px solid var(--lilac);font-size:14px}
 .item{flex-wrap:wrap;gap:10px;padding:12px}.item-info{flex:1 1 calc(100% - 80px)}.item .qty{margin-right:auto}
 .box{padding:16px}.rhead{padding:22px 14px}.rhead h2{font-size:26px}.rbody{padding:18px 14px}.oid{font-size:20px}
 .foot{padding:36px 16px 20px}
-.toast{left:14px;right:14px;bottom:14px;justify-content:center}
+.toast{left:14px;right:14px;bottom:14px;max-width:none;justify-content:center}
 .mbox{padding:20px}.emoji{grid-template-columns:repeat(6,1fr)}.login-card{padding:28px}
 .adm-h{height:auto;padding:10px 14px;flex-wrap:wrap;gap:8px}.adm-c{padding:20px 14px}.adm-c .row{flex-wrap:wrap}}
 `;
@@ -849,7 +853,7 @@ function PawClubApp() {
   useEffect(() => { document.body.style.overflow = menu ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menu]);
   useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
 
-  const notify = (msg, color = "#2E8B57") => { setToast({ msg, color }); setTimeout(() => setToast(null), 2500); };
+  const notify = (msg, color = "#2E8B57", ms = 2500) => { setToast({ msg, color }); setTimeout(() => setToast(null), ms); };
   const cats = [...new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category)])];
   const delivery = getDelivery(form.city);
   const shown = products.filter((p) => (category === "All" || p.category === category) && (p.name + p.category).toLowerCase().includes(search.toLowerCase()));
@@ -867,7 +871,7 @@ function PawClubApp() {
   const place = async () => {
     if (placing) return;
     setPlacing(true);
-    const { data, error } = await supabase.functions.invoke("hyper-worker", {
+    const { data, error } = await supabase.functions.invoke(ORDER_FUNCTION, {
       body: {
         items: cart.map(({ id, qty }) => ({ id, qty })),
         customer: { name: form.name, phone: form.phone, address: form.address, city: form.city },
@@ -878,9 +882,20 @@ function PawClubApp() {
     setPlacing(false);
     setToken(""); setTsKey((k) => k + 1); // bot-check tokens work only once
     if (error || !data?.id) {
+      console.error("order error:", error, data);
       let msg = "Could not place the order. Please try again.";
-      try { const j = await error?.context?.json?.(); if (j?.error) msg = j.error; } catch {}
-      return notify(msg, "#C0392B");
+      if (error?.name === "FunctionsFetchError") {
+        // The browser could not read any reply: almost always CORS (ALLOWED_ORIGINS) or a wrong function name.
+        msg = `Could not reach the order server. Add ${window.location.origin} to ALLOWED_ORIGINS in Supabase.`;
+      } else if (error?.context && typeof error.context.json === "function") {
+        let detail = "";
+        try { const j = await error.context.json(); detail = j?.error || j?.message || ""; } catch {}
+        const status = error.context.status ? ` (${error.context.status})` : "";
+        msg = (detail || msg) + status;
+      } else if (error?.message) {
+        msg = error.message;
+      }
+      return notify(msg, "#C0392B", 7000);
     }
     setCart([]); setPm(""); setTxId("");
     nav(`/order/${data.id}`, { replace: true });
