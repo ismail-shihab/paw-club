@@ -39,6 +39,32 @@ const stars = (r) => "★".repeat(Math.round(r)) + "☆".repeat(5 - Math.round(r
 const pct = (p) => (p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : 0);
 const load = (k, d) => { try { const s = localStorage.getItem(k); return s ? JSON.parse(s) : d; } catch { return d; } };
 
+// Converts any technical database/network error into a warm, plain-language message (never exposes status codes)
+const friendlyError = (raw) => {
+  const s = String(raw || "").toLowerCase();
+  if (!s) return "We couldn't complete your order right now. Please try again in a moment.";
+  if (s.includes("orders_tx_unique") || s.includes("orders_active_tx_unique") || s.includes("duplicate key") || s.includes("already used")) {
+    return "This Transaction ID has already been submitted. If you just placed your order, please wait a few seconds for confirmation or check your latest payment SMS.";
+  }
+  if (s.includes("turnstile") || s.includes("captcha") || s.includes("security")) {
+    return "The security check didn't finish in time. Please wait a second and tap Place order again.";
+  }
+  if (s.includes("functionsfetcherror") || s.includes("failed to fetch") || s.includes("network") || s.includes("timeout")) {
+    return "Your internet connection looks a bit slow right now. Please check your connection and try again.";
+  }
+  if (s.includes("database error") || s.includes("internal server") || /\(\s*\d{3}\s*\)/.test(s)) {
+    const cleaned = String(raw)
+      .replace(/^database error[^:]*:\s*/i, "")
+      .replace(/\s*\(\s*\d{3}\s*\)\s*/g, " ")
+      .trim();
+    if (!cleaned || /constraint|unique|sql|postgres|violates/i.test(cleaned)) {
+      return "We hit a brief hiccup saving your order. Please wait a few seconds and try again.";
+    }
+    return cleaned;
+  }
+  return String(raw).replace(/\s*\(\s*\d{3}\s*\)\s*/g, " ").trim();
+};
+
 const calcDiscount = (coupon, subtotal) => {
   if (!coupon || !coupon.active || subtotal < Number(coupon.min_order || 0)) return 0;
   const val = Number(coupon.discount_value) || 0;
@@ -601,7 +627,13 @@ function CouponModal({ onSave, onClose }) {
   );
 }
 
-const STATUS = { Pending: "#D99A1E", Processing: "#7A4FE0", Delivered: "#1E5B3A", Cancelled: "#C0392B" };
+const STATUS = {
+  Pending: "#D99A1E",
+  Processing: "#7A4FE0",
+  Delivered: "#1E5B3A",
+  Cancelled: "#C0392B",
+  Rejected: "#8E1B1B",
+};
 
 function OrderModal({ order, onClose, onStatus }) {
   return (
@@ -731,7 +763,7 @@ function Admin({ products, setProducts, orders, setOrders, coupons, setCoupons, 
                     <td><b style={{ color: "var(--green)" }}>{o.orderId}</b><br /><small>{new Date(o.placedAt).toLocaleDateString()}</small></td>
                     <td>{o.customer.name}<br /><small style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><PhoneIcon size={12} /> {o.customer.phone} · {o.customer.city}</small></td>
                     <td><b>৳{o.total.toLocaleString()}</b></td><td>{o.payment.method}{o.payment.txId && <><br /><small>{o.payment.txId}</small></>}</td>
-                    <td><span style={{ color: STATUS[o.status], fontWeight: 700 }}>{o.status}</span></td>
+                    <td><span style={{ color: STATUS[o.status] || "var(--ink)", fontWeight: 700 }}>{o.status}</span></td>
                     <td><button className="sm v" onClick={() => setSel(o)}>View</button></td>
                   </tr>
                 ))}
@@ -780,14 +812,14 @@ function AdminGate({ onDone, onBack }) {
 
   const startMfa = async () => {
     const { data: f, error } = await supabase.auth.mfa.listFactors();
-    if (error) return setMsg(error.message);
+    if (error) return setMsg("Could not verify your session. Please try again.");
     const verified = f?.totp?.[0];
     if (verified) { setFid(verified.id); setStage("verify"); return; }
     for (const x of f?.all ?? []) {
       if (x.factor_type === "totp" && x.status === "unverified") await supabase.auth.mfa.unenroll({ factorId: x.id });
     }
     const { data, error: e2 } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "admin-" + Date.now() });
-    if (e2) return setMsg("Could not start 2FA setup: " + e2.message);
+    if (e2) return setMsg("Could not start two-factor setup. Please try again.");
     setFid(data.id);
     setQr(data.totp.qr_code);
     setSecret(data.totp.secret);
@@ -800,7 +832,7 @@ function AdminGate({ onDone, onBack }) {
   }, []);
 
   const login = async () => {
-    if (!captchaToken) return setMsg("Complete the security check first.");
+    if (!captchaToken) return setMsg("Please complete the security check first.");
     setBusy(true); setMsg("");
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -809,7 +841,7 @@ function AdminGate({ onDone, onBack }) {
     });
     setBusy(false); setPw("");
     setCaptchaToken(""); setTsKey((k) => k + 1);
-    if (error) return setMsg("Access denied.");
+    if (error) return setMsg("Incorrect email or password.");
     if (!REQUIRE_MFA) return onDone();
     await startMfa();
   };
@@ -817,7 +849,7 @@ function AdminGate({ onDone, onBack }) {
     setBusy(true); setMsg("");
     const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: fid, code: code.trim() });
     setBusy(false);
-    if (error) { setCode(""); return setMsg("Wrong or expired code. Try again."); }
+    if (error) { setCode(""); return setMsg("That code is incorrect or expired. Please try again."); }
     onDone();
   };
   const switchAccount = async () => { await supabase.auth.signOut(); setStage("login"); setMsg(""); setCode(""); };
@@ -891,7 +923,7 @@ function ProductPage({ products, setProducts, loaded, wish, toggle, add, notify 
 
   const submitReview = async () => {
     if (!revCode.trim() || !PHONE_RE.test(revPhone)) {
-      return notify("Enter your Order Code and 11-digit Phone Number", "#C0392B");
+      return notify("Please enter your order code and 11-digit phone number.", "#C0392B");
     }
     setRevBusy(true);
     const { data, error } = await supabase.rpc("submit_review", {
@@ -903,7 +935,7 @@ function ProductPage({ products, setProducts, loaded, wish, toggle, add, notify 
     });
     setRevBusy(false);
     if (error || data?.error) {
-      return notify(data?.error || error?.message || "Could not submit review", "#C0392B", 4000);
+      return notify(friendlyError(data?.error || "We couldn't verify that order yet. Please check your order code and phone number."), "#C0392B", 4000);
     }
     setProducts((prev) =>
       prev.map((x) =>
@@ -1128,6 +1160,7 @@ function PawClubApp() {
   const [token, setToken] = useState(""); // Turnstile bot-check token
   const [tsKey, setTsKey] = useState(0);
   const [placing, setPlacing] = useState(false);
+  const [verifyingOrder, setVerifyingOrder] = useState(null); // { id, txId, total, method, secondsLeft }
 
   // load products for everyone
   useEffect(() => {
@@ -1175,7 +1208,46 @@ function PawClubApp() {
   useEffect(() => { document.body.style.overflow = menu ? "hidden" : ""; return () => { document.body.style.overflow = ""; }; }, [menu]);
   useEffect(() => { const el = document.createElement("style"); el.innerHTML = CSS + EXTRA_CSS; document.head.appendChild(el); return () => document.head.removeChild(el); }, []);
 
-  const notify = (msg, color = "#2E8B57", ms = 2500) => { setToast({ msg, color }); setTimeout(() => setToast(null), ms); };
+  // Live background polling when bKash/Nagad SMS takes a few extra seconds to arrive
+  useEffect(() => {
+    if (!verifyingOrder?.id) return;
+
+    const countdown = setInterval(() => {
+      setVerifyingOrder((prev) => {
+        if (!prev) return null;
+        return { ...prev, secondsLeft: Math.max(0, prev.secondsLeft - 1) };
+      });
+    }, 1000);
+
+    const poller = setInterval(async () => {
+      try {
+        const { data } = await supabase.rpc("get_order", { oid: verifyingOrder.id });
+        const row = data?.[0];
+        if (row && (row.status === "Processing" || row.status === "Delivered")) {
+          clearInterval(poller);
+          clearInterval(countdown);
+          const confirmedId = verifyingOrder.id;
+          setVerifyingOrder(null);
+          setCart([]);
+          setPm("");
+          setTxId("");
+          setAppliedCoupon(null);
+          setCouponInput("");
+          notify("Payment verified! Your order is confirmed.");
+          nav(`/order/${confirmedId}`, { replace: true });
+        }
+      } catch {
+        // Keep checking silently on transient network blips
+      }
+    }, 3000);
+
+    return () => {
+      clearInterval(poller);
+      clearInterval(countdown);
+    };
+  }, [verifyingOrder?.id]);
+
+  const notify = (msg, color = "#2E8B57", ms = 3000) => { setToast({ msg, color }); setTimeout(() => setToast(null), ms); };
   const cats = [...new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category)])];
   const isDhaka = form.city.trim().toLowerCase() === "dhaka";
   const delivery = getDelivery(form.city);
@@ -1197,7 +1269,7 @@ function PawClubApp() {
 
   const applyCoupon = async () => {
     const code = couponInput.trim().toUpperCase();
-    if (!code) return notify("Enter a coupon code", "#C0392B");
+    if (!code) return notify("Please enter a coupon code.", "#C0392B");
     setCouponBusy(true);
     const { data, error } = await supabase
       .from("coupons")
@@ -1206,9 +1278,9 @@ function PawClubApp() {
       .eq("active", true)
       .maybeSingle();
     setCouponBusy(false);
-    if (error || !data) return notify("Invalid or expired coupon code", "#C0392B");
+    if (error || !data) return notify("That coupon code is invalid or has expired.", "#C0392B");
     if (subtotal < Number(data.min_order || 0)) {
-      return notify(`Minimum order of ৳${Number(data.min_order).toLocaleString()} required for ${data.code}`, "#C0392B", 4000);
+      return notify(`Please add at least ৳${Number(data.min_order).toLocaleString()} to your cart to use ${data.code}.`, "#C0392B", 4000);
     }
     setAppliedCoupon(data);
     setCouponInput(data.code);
@@ -1236,22 +1308,34 @@ function PawClubApp() {
     });
     setPlacing(false);
     setToken(""); setTsKey((k) => k + 1); // bot-check tokens work only once
+
     if (error || !data?.id) {
-      console.error("order error:", error, data);
-      let msg = "Could not place the order. Please try again.";
+      let rawDetail = "";
       if (error?.name === "FunctionsFetchError") {
-        // The browser could not read any reply: almost always CORS (ALLOWED_ORIGINS) or a wrong function name.
-        msg = `Could not reach the order server. Add ${window.location.origin} to ALLOWED_ORIGINS in Supabase.`;
+        rawDetail = "network";
       } else if (error?.context && typeof error.context.json === "function") {
-        let detail = "";
-        try { const j = await error.context.json(); detail = j?.error || j?.message || ""; } catch {}
-        const status = error.context.status ? ` (${error.context.status})` : "";
-        msg = (detail || msg) + status;
-      } else if (error?.message) {
-        msg = error.message;
+        try {
+          const j = await error.context.json();
+          rawDetail = j?.userMessage || j?.error || j?.message || "";
+        } catch {}
+      } else {
+        rawDetail = data?.userMessage || data?.error || error?.message || "";
       }
-      return notify(msg, "#C0392B", 7000);
+      return notify(friendlyError(rawDetail), "#C0392B", 5000);
     }
+
+    // If bKash/Nagad SMS is still arriving on the phone, show the friendly live waiting screen
+    if (data.pending && (pm === "bkash" || pm === "nagad")) {
+      setVerifyingOrder({
+        id: data.id,
+        txId: txId.trim().toUpperCase(),
+        total,
+        method: pm === "nagad" ? "Nagad" : "bKash",
+        secondsLeft: 60,
+      });
+      return;
+    }
+
     setCart([]); setPm(""); setTxId(""); setAppliedCoupon(null); setCouponInput("");
     nav(`/order/${data.id}`, { replace: true });
   };
@@ -1322,7 +1406,71 @@ function PawClubApp() {
   const txOk = !pmObj?.needsTx || /^[A-Za-z0-9]{6,30}$/.test(txId);
   const payOk = !!pmObj && txOk && !(pm === "cod" && !isDhaka);
   const checkoutEl =
-    cart.length === 0 ? (
+    verifyingOrder ? (
+      <div className="cart">
+        <div className="box" style={{ textAlign: "center", padding: "32px 24px" }}>
+          <div style={{ fontSize: 52, marginBottom: 10 }}>🐾</div>
+          {verifyingOrder.secondsLeft > 0 ? (
+            <>
+              <h2 style={{ fontFamily: "var(--display)", fontSize: 28, color: "var(--green)", marginBottom: 8 }}>
+                Verifying your {verifyingOrder.method} payment…
+              </h2>
+              <p style={{ color: "var(--muted)", fontSize: 15, lineHeight: 1.7, maxWidth: 460, margin: "0 auto 18px" }}>
+                Your order <b>{verifyingOrder.id}</b> is safely saved! We are waiting for your{" "}
+                <b>{verifyingOrder.method}</b> confirmation SMS (TrxID: <b>{verifyingOrder.txId}</b>) to arrive.
+                This page will update automatically as soon as it comes through.
+              </p>
+              <div className="note" style={{ display: "inline-block", padding: "8px 20px", marginBottom: 16 }}>
+                Checking automatically… <b>{verifyingOrder.secondsLeft}s</b>
+              </div>
+              <p style={{ fontSize: 13, color: "var(--muted)" }}>
+                Please keep this window open — no need to send money or submit again.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 style={{ fontFamily: "var(--display)", fontSize: 28, color: "var(--green)", marginBottom: 8 }}>
+                Order saved — confirming shortly
+              </h2>
+              <p style={{ color: "var(--muted)", fontSize: 15, lineHeight: 1.7, maxWidth: 460, margin: "0 auto 20px" }}>
+                Your order <b>{verifyingOrder.id}</b> is recorded with TrxID <b>{verifyingOrder.txId}</b>.
+                Mobile network SMS delivery is taking a little longer than usual, so your order will be
+                confirmed automatically as soon as the SMS arrives.
+              </p>
+              <div className="row" style={{ flexDirection: "column", gap: 10, maxWidth: 360, margin: "0 auto" }}>
+                <a
+                  className="btn green block"
+                  style={{ textDecoration: "none", textAlign: "center" }}
+                  href={`https://wa.me/88${SHOP_PHONE}?text=${encodeURIComponent(
+                    `Hi Paw Club! I just placed order ${verifyingOrder.id} (Total ৳${verifyingOrder.total}) via ${verifyingOrder.method} with TrxID ${verifyingOrder.txId}. Please confirm my payment.`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Confirm faster via WhatsApp
+                </a>
+                <button
+                  type="button"
+                  className="btn ghost block"
+                  onClick={() => {
+                    const id = verifyingOrder.id;
+                    setVerifyingOrder(null);
+                    setCart([]);
+                    setPm("");
+                    setTxId("");
+                    setAppliedCoupon(null);
+                    setCouponInput("");
+                    nav(`/order/${id}`, { replace: true });
+                  }}
+                >
+                  View order receipt
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    ) : cart.length === 0 ? (
       <div className="cart"><div className="empty"><div>🐾</div><b>Your cart is empty</b>Add something your cat will love.<br /><button className="btn" onClick={() => go("/shop")}>Start shopping</button></div></div>
     ) : step >= 3 && !formOk ? (
       <Navigate to="/checkout/delivery" replace />
@@ -1350,7 +1498,7 @@ function PawClubApp() {
         {step === 2 && (<>
           <div><label className="l">Full name *</label><input className="inp" maxLength={80} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} /></div>
           <div><label className="l" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><PhoneIcon size={14} /> Phone number *</label><input className="inp" inputMode="numeric" maxLength={11} placeholder="01XXXXXXXXX" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value.replace(/\D/g, "") }))} />
-            {form.phone.length >= 11 && !phoneOk && <p style={{ color: "#C0392B", fontSize: 13, marginTop: -8, marginBottom: 12 }}>Enter a valid 11-digit mobile number starting with 01.</p>}</div>
+            {form.phone.length >= 11 && !phoneOk && <p style={{ color: "#C0392B", fontSize: 13, marginTop: -8, marginBottom: 12 }}>Please enter a valid 11-digit mobile number starting with 01.</p>}</div>
           <div><label className="l">Full address *</label><input className="inp" maxLength={200} placeholder="House, road, area" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} /></div>
           <div><label className="l">City *</label>
             <select className="inp" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}>
@@ -1359,7 +1507,7 @@ function PawClubApp() {
             </select></div>
           {form.city && <div className="note">{isDhaka ? "Dhaka delivery: ৳80 (Cash on Delivery available)" : "Outside Dhaka delivery: ৳150 (Prepayment via bKash / Nagad required)"}</div>}
           <div className="box"><div className="srow"><span>Subtotal</span><span>৳{subtotal.toLocaleString()}</span></div><div className="srow"><span>Delivery</span><span>{form.city ? `৳${delivery}` : "—"}</span></div><div className="stot"><span>Total</span><span>৳{(form.city ? total : subtotal).toLocaleString()}</span></div></div>
-          <div className="row"><button className="btn ghost block" onClick={() => nav("/cart")}>Back</button><button className="btn block" onClick={() => (formOk ? nav("/checkout/payment") : notify("Please fill in all fields correctly", "#C0392B"))}>Continue to payment</button></div>
+          <div className="row"><button className="btn ghost block" onClick={() => nav("/cart")}>Back</button><button className="btn block" onClick={() => (formOk ? nav("/checkout/payment") : notify("Please fill in your name, phone number, address, and city.", "#C0392B"))}>Continue to payment</button></div>
         </>)}
 
         {step === 3 && (<>
@@ -1405,7 +1553,7 @@ function PawClubApp() {
                 className={`pay ${pm === m.id ? "on" : ""}`}
                 style={disabled ? { opacity: 0.48, cursor: "not-allowed", background: "#F5EFE0" } : undefined}
                 onClick={() => {
-                  if (disabled) return notify("Cash on Delivery is only available inside Dhaka", "#C0392B");
+                  if (disabled) return notify("Cash on Delivery is available inside Dhaka only.", "#C0392B");
                   setPm(m.id);
                   setTxId("");
                 }}
@@ -1429,7 +1577,7 @@ function PawClubApp() {
           )}
           {pm === "cod" && <div className="note">Pay <b>৳{total.toLocaleString()}</b> in cash when your order arrives.</div>}
           <div className="row"><button className="btn ghost block" onClick={() => nav("/checkout/delivery")}>Back</button>
-            <button className="btn block" onClick={() => { if (!pm) return notify("Choose a payment method", "#C0392B"); if (!txOk) return notify("Enter a valid Transaction ID (6–30 letters or numbers)", "#C0392B"); nav("/checkout/review"); }}>Review order</button></div>
+            <button className="btn block" onClick={() => { if (!pm) return notify("Please select a payment method.", "#C0392B"); if (!txOk) return notify("Please enter the Transaction ID from your payment SMS.", "#C0392B"); nav("/checkout/review"); }}>Review order</button></div>
         </>)}
 
         {step === 4 && (<>
